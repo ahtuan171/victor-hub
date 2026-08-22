@@ -28,18 +28,16 @@ def test_the_harness_talks_to_a_real_postgres(session: Session) -> None:
 
 
 def test_the_schema_under_test_is_the_migrated_one(session: Session) -> None:
-    """`content_item` exists because Alembic ran, not because metadata created it.
+    """The schema exists because Alembic ran, not because metadata created it.
 
-    The distinction matters: `SQLModel.metadata.create_all` emits neither of the `CHECK` constraints
-    that make INV-1 and INV-2 hold, so a suite built that way would pass while the real database
-    refused the same rows.
+    `SQLModel.metadata.create_all` never creates an `alembic_version` table — that bookkeeping
+    table belongs to Alembic alone, and nothing in `app/models.py` declares it. Its presence is
+    therefore direct evidence the harness ran `alembic upgrade head` rather than building the
+    schema from model metadata, which is what `backend/AGENTS.md` requires (a `create_all` suite
+    would pass against a schema production never has: no CHECK constraints, no partial indexes,
+    whatever `alembic upgrade head` and model metadata happen to agree on that day).
     """
-    constraints = {
-        constraint["name"]
-        for constraint in inspect(session.get_bind()).get_check_constraints("content_item")
-    }
-    assert "ck_content_item_platform_required_past_idea" in constraints
-    assert "ck_content_item_title_not_blank" in constraints
+    assert "alembic_version" in inspect(session.get_bind()).get_table_names()
 
 
 def test_a_committed_row_is_visible_within_the_test(session: Session, creator: Creator) -> None:

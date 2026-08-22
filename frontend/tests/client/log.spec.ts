@@ -28,9 +28,11 @@ function mockTrip(overrides: Partial<Trip> = {}): Trip {
   return {
     id: 10,
     name: "Japan Summer 2026",
+    destination: null,
     start_date: "2026-08-01",
     end_date: "2026-08-15",
     status: "planned",
+    notes: null,
     created_at: "2026-08-01T00:00:00Z",
     updated_at: "2026-08-01T00:00:00Z",
     ...overrides,

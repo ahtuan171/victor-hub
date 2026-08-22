@@ -4,14 +4,7 @@ import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 import { parse } from "yaml";
 
-import {
-  DESTINATION_STATUSES,
-  INVARIANT_CODES,
-  PLATFORMS,
-  STATUSES,
-  THEMES,
-  TRIP_STATUSES,
-} from "../../lib/api";
+import { DESTINATION_STATUSES, THEMES, TRIP_STATUSES } from "../../lib/api";
 
 /**
  * `lib/api.ts` is hand-written from the contract, so this is what stops it drifting from one.
@@ -26,9 +19,8 @@ import {
  * and the enums are the part that would otherwise silently accept an unknown value at runtime.
  */
 
-const CONTRACT_001 = resolve(__dirname, "../../../specs/001-content-calendar/contracts/openapi.yaml");
 // The 002 contract is a delta on 001, not a second API (see its own header comment) — Theme lives
-// only here, so this file has to read both rather than just the one it started with.
+// only here.
 const CONTRACT_002 = resolve(__dirname, "../../../specs/002-pixel-arcade-skin/contracts/openapi.yaml");
 // 003, unlike 002, is a new standalone resource space rather than a delta (its own header comment)
 // — DestinationStatus and TripStatus live only here.
@@ -41,7 +33,7 @@ function schemasIn(contractPath: string): Record<string, unknown> {
   return schemas as Record<string, unknown>;
 }
 
-function contractEnum(schema: string, contractPath: string = CONTRACT_001): string[] {
+function contractEnum(schema: string, contractPath: string): string[] {
   const target = schemasIn(contractPath)[schema];
   expect(target, `no components.schemas.${schema} in ${contractPath}`).toBeTruthy();
 
@@ -50,22 +42,6 @@ function contractEnum(schema: string, contractPath: string = CONTRACT_001): stri
 
   return values as string[];
 }
-
-test("Status matches the contract — FR-007's three states, in pipeline order", () => {
-  expect([...STATUSES]).toEqual(contractEnum("Status"));
-});
-
-test("Platform matches the contract — FR-010's closed set", () => {
-  expect([...PLATFORMS]).toEqual(contractEnum("Platform"));
-});
-
-test("InvariantCode matches the contract's 409 codes", () => {
-  // Nested one level deeper: `code` is a property of InvariantError, not a schema of its own.
-  const code = (schemasIn(CONTRACT_001)["InvariantError"] as { properties?: { code?: { enum?: unknown } } })
-    .properties?.code;
-
-  expect([...INVARIANT_CODES]).toEqual(code?.enum);
-});
 
 test("Theme matches the 002 contract — FR-010's two presentations, dark first", () => {
   expect([...THEMES]).toEqual(contractEnum("Theme", CONTRACT_002));

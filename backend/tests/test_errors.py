@@ -34,18 +34,14 @@ kind, and an error body that grew a `field` or an `errors` array would break the
 type as surely as an array-shaped `detail` would."""
 
 CONTRACTED_INVARIANT_ERROR_KEYS = {"code", "detail"}
-"""The contract's `InvariantError`, which 409 — and only 409 — returns.
+"""The `{code, detail}` shape a 409 carries — currently unreachable, since the one thing that
+produced a 409 (Content Calendar's INV-1) was removed 2026-08-22. Kept rather than deleted: no
+other status code shares this key set, so `expected_keys_for` stays a correct, generic answer for
+whichever future route next needs a 409 to distinguish two failure reasons for the caller, the
+same job `platform_required`/`platform_locked` did.
 
-Until T030 this file asserted `CONTRACTED_ERROR_KEYS` against every 4xx, and said so deliberately.
-That was right about the responses it was written against and wrong as a generalisation: the
-contract has always declared `InvariantError` on both 409s, and the two were only ever consistent
-because no endpoint could return one. `backend/AGENTS.md` recorded the seam and called it for the
-contract, on the grounds that `code` is the only thing separating `platform_required` from
-`platform_locked` — two different instructions to the creator, not two phrasings of one.
-
-The strictness is kept and the scope narrowed. Each status code has exactly one legal key set,
-chosen by `expected_keys_for`, so a 401 that grew a `code` still fails and a third shape cannot
-appear anywhere without being declared here first.
+Each status code has exactly one legal key set, chosen by `expected_keys_for`, so a 401 that grew
+a `code` still fails and a third shape cannot appear anywhere without being declared here first.
 """
 
 
@@ -89,83 +85,6 @@ def assert_matches_the_contracted_error_shape(response: Any) -> None:
 # Every 4xx this API can currently produce. Each new 4xx must be registered here as well as in the
 # test file for its own route — the by-id 404s arrived that way at T049 and T050.
 REACHABLE_4XX = [
-    pytest.param(
-        lambda client, auth_client, creator: client.post("/content-items", json={"title": "x"}),
-        401,
-        id="create-item-no-credential",
-    ),
-    pytest.param(
-        lambda client, auth_client, creator: client.get("/content-items"),
-        401,
-        id="list-items-no-credential",
-    ),
-    pytest.param(
-        lambda client, auth_client, creator: auth_client.post(
-            "/content-items", json={"title": "   "}
-        ),
-        422,
-        id="create-item-blank-title",
-    ),
-    pytest.param(
-        lambda client, auth_client, creator: auth_client.post(
-            "/content-items", json={"title": "x", "status": "draft"}
-        ),
-        409,
-        id="create-item-invariant-violation",
-    ),
-    # The by-id 404s (T049, T050). Distinct from `starlette-not-found` below, which is the
-    # framework's own 404 for an unrouted path — these are the application's, for a routed path
-    # and a missing row, and nothing else proves the two carry the same shape. Reachable in
-    # production rather than hypothetical: T054's drag names an id and T056 has to survive the item
-    # being already gone. All three verbs are listed because all three declare the 404 separately,
-    # so a route raising a bare `HTTPException` with a dict detail would only fail its own entry.
-    pytest.param(
-        lambda client, auth_client, creator: auth_client.get("/content-items/999999"),
-        404,
-        id="fetch-item-not-found",
-    ),
-    pytest.param(
-        lambda client, auth_client, creator: auth_client.patch(
-            "/content-items/999999", json={"title": "x"}
-        ),
-        404,
-        id="update-item-not-found",
-    ),
-    pytest.param(
-        lambda client, auth_client, creator: auth_client.delete("/content-items/999999"),
-        404,
-        id="delete-item-not-found",
-    ),
-    pytest.param(
-        lambda client, auth_client, creator: client.delete("/content-items/999999"),
-        401,
-        id="delete-item-no-credential",
-    ),
-    pytest.param(
-        lambda client, auth_client, creator: auth_client.patch("/content-items/999999", json={}),
-        422,
-        id="update-item-empty-body",
-    ),
-    # The date bounds are the first 4xx reachable through a *query parameter* rather than a body,
-    # and FastAPI renders those through the same RequestValidationError handler — which is the claim
-    # worth pinning, because that handler is what flattens `detail` from an array to a string. Two
-    # bounds rather than one: they are declared separately, so a bound that lost its `date` type
-    # would start returning 200 and only its own entry here would notice. The parse-coverage cases
-    # live in test_content_items.py; these two are about the response *shape*.
-    pytest.param(
-        lambda client, auth_client, creator: auth_client.get(
-            "/content-items", params={"date_from": "not-a-date"}
-        ),
-        422,
-        id="list-items-malformed-date-from",
-    ),
-    pytest.param(
-        lambda client, auth_client, creator: auth_client.get(
-            "/content-items", params={"date_to": "2026-09-01T12:00:00Z"}
-        ),
-        422,
-        id="list-items-date-to-carrying-a-time",
-    ),
     pytest.param(
         lambda client, auth_client, creator: client.post(
             "/auth/login", json={"email": creator.email, "password": "not the password"}
@@ -421,6 +340,78 @@ REACHABLE_4XX = [
         404,
         id="delete-trip-missing-id",
     ),
+    # Module 02 (Travel Schedule) — the TravelEvent routes. Same shape as the Trip 4xx cases
+    # above — a shared `get_or_404` in `travel_events.py` makes "no such travel event" identical
+    # whichever verb asked.
+    pytest.param(
+        lambda client, auth_client, creator: client.get("/travel-events"),
+        401,
+        id="list-travel-events-no-credential",
+    ),
+    pytest.param(
+        lambda client, auth_client, creator: client.post(
+            "/travel-events", json={"event_type": "note", "title": "x", "event_date": "2026-09-01"}
+        ),
+        401,
+        id="create-travel-event-no-credential",
+    ),
+    pytest.param(
+        lambda client, auth_client, creator: auth_client.post(
+            "/travel-events", json={"title": "x"}
+        ),
+        422,
+        id="create-travel-event-missing-fields",
+    ),
+    pytest.param(
+        lambda client, auth_client, creator: auth_client.post(
+            "/travel-events",
+            json={
+                "trip_id": 999999,
+                "event_type": "note",
+                "title": "x",
+                "event_date": "2026-09-01",
+            },
+        ),
+        422,
+        id="create-travel-event-missing-trip",
+    ),
+    pytest.param(
+        lambda client, auth_client, creator: client.get("/travel-events/1"),
+        401,
+        id="get-travel-event-no-credential",
+    ),
+    pytest.param(
+        lambda client, auth_client, creator: auth_client.get("/travel-events/999999"),
+        404,
+        id="get-travel-event-missing-id",
+    ),
+    pytest.param(
+        lambda client, auth_client, creator: client.patch("/travel-events/1", json={"title": "x"}),
+        401,
+        id="update-travel-event-no-credential",
+    ),
+    pytest.param(
+        lambda client, auth_client, creator: auth_client.patch(
+            "/travel-events/999999", json={"title": "x"}
+        ),
+        404,
+        id="update-travel-event-missing-id",
+    ),
+    pytest.param(
+        lambda client, auth_client, creator: auth_client.patch("/travel-events/1", json={}),
+        422,
+        id="update-travel-event-empty-body",
+    ),
+    pytest.param(
+        lambda client, auth_client, creator: client.delete("/travel-events/1"),
+        401,
+        id="delete-travel-event-no-credential",
+    ),
+    pytest.param(
+        lambda client, auth_client, creator: auth_client.delete("/travel-events/999999"),
+        404,
+        id="delete-travel-event-missing-id",
+    ),
     # T038, User Story 3: searchLocations. The 502 (Nominatim unreachable) is not a 4xx, so it
     # has no entry here — `test_locations.py` covers it on its own.
     pytest.param(
@@ -559,17 +550,18 @@ def test_the_generated_document_declares_a_body_for_every_4xx(generated_document
 def test_every_declared_4xx_uses_the_error_schema_its_status_code_calls_for(
     generated_document: Any,
 ) -> None:
-    """Uniformity in the document, not just in the bodies — now with exactly one exception.
+    """Uniformity in the document, not just in the bodies.
 
     Two endpoints returning two differently-shaped errors would each be individually valid and
     together make the contract's "uniformly" false. Asserting the `$ref` rather than the resolved
     shape is deliberate: it fails if an *undeclared* error model is introduced, which is the thing
     being prevented.
 
-    The 409 carrying `InvariantErrorResponse` is the contract's own exception (see
-    `CONTRACTED_INVARIANT_ERROR_KEYS`), and it is pinned here by status code rather than waived. A
-    409 that reverted to `ErrorResponse` fails, and so does a 401 that grew the invariant shape —
-    which is the pair of mistakes a blanket "allow two schemas" assertion would let through.
+    No route currently declares a 409 (the one thing that did, Content Calendar's INV-1, was
+    removed — see `CONTRACTED_INVARIANT_ERROR_KEYS`'s own docstring), so `expected` below is built
+    from whatever status codes `refs_by_status` actually contains rather than a hard-coded set —
+    the assertion still holds if a future 409 reintroduces the invariant shape, without this test
+    needing to change.
     """
     refs_by_status: dict[str, set[str | None]] = {}
     for operations in generated_document["paths"].values():
@@ -590,20 +582,6 @@ def test_every_declared_4xx_uses_the_error_schema_its_status_code_calls_for(
     }
 
     assert refs_by_status == expected
-
-
-def test_the_invariant_error_schema_pins_the_two_contracted_codes(generated_document: Any) -> None:
-    """`code` is an enum in the contract, and it has to stay one in the generated document.
-
-    A `code` typed as a bare string tells the frontend nothing: it could not exhaustively switch on
-    the two cases, which is the entire reason this field exists rather than a parsed `detail`. This
-    is also what makes adding a third invariant a contract change rather than a quiet one.
-    """
-    schema = generated_document["components"]["schemas"]["InvariantErrorResponse"]
-    code = schema["properties"]["code"]
-
-    assert set(code["enum"]) == {"platform_required", "platform_locked"}
-    assert sorted(schema["required"]) == ["code", "detail"]
 
 
 def test_the_error_schema_types_detail_as_a_required_string(generated_document: Any) -> None:

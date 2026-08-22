@@ -52,7 +52,7 @@ from app.auth import create_access_token, hash_password
 from app.config import get_settings
 from app.db import get_engine, get_session
 from app.main import app as fastapi_app
-from app.models import ContentItem, Creator
+from app.models import Creator
 
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
 """`backend/`. Resolved from this file so the suite runs from any working directory — CI does
@@ -164,7 +164,7 @@ def engine(_harness_environment: None) -> Iterator[Engine]:
 
     # The migration ran, so this can only fail if it ran somewhere else. Cheap, and the alternative
     # is every test failing with "relation does not exist".
-    missing = {"creator", "content_item"} - set(inspect(engine).get_table_names())
+    missing = {"creator"} - set(inspect(engine).get_table_names())
     if missing:
         engine.dispose()
         pytest.exit(
@@ -195,9 +195,6 @@ def _empty_the_test_database(engine: Engine) -> None:
     suite's runtime for nothing.
     """
     with engine.begin() as connection:
-        # content_item first out of habit. There is no foreign key between the two (INV-4), and
-        # there is deliberately never going to be one.
-        connection.execute(delete(ContentItem))
         connection.execute(delete(Creator))
 
 

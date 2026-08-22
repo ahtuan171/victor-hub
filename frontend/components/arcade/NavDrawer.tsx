@@ -378,8 +378,17 @@ export function NavDrawer() {
  * product's original surface and the one a returning creator expects at the top.
  */
 const SCREENS: ReadonlyArray<{ readonly href: string; readonly slug: string; readonly label: string }> = [
-  { href: "/calendar", slug: "calendar", label: "Content Calendar" },
   { href: "/map", slug: "map", label: "Travel Map" },
+  // Module 02 (Travel Schedule), added the same way `/map` was at 003-travel-map T018 — see
+  // `Module_02_Travel_Schedule_Spec.md`. `/calendar` (Content Calendar) removed from this list at
+  // the owner's request rather than deleted outright — the route, its component tree and its
+  // whole test suite are untouched, only the link here is gone.
+  { href: "/schedule", slug: "schedule", label: "Travel Schedule" },
+  // Module 03 (Travel Intelligence) — added outside this session by the owner. `/intel` does not
+  // exist on `main` yet (it is on the local-only branch `spike/module-02-03-prototype-2026-08-21`),
+  // so this link 404s for real until that surface is actually built here. Left as-is rather than
+  // removed, since it was not this session's change to make silently.
+  { href: "/intel", slug: "intel", label: "Travel Intelligence" },
 ];
 
 /** The two options, in the order the toggle group draws them. Dark first — it is FR-012's default. */

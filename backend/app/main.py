@@ -17,9 +17,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from app.api import auth, content_items, destinations, locations, photographs, preferences, trips
+from app.api import (
+    ai,
+    auth,
+    destinations,
+    locations,
+    photographs,
+    preferences,
+    travel_events,
+    trips,
+)
 from app.config import get_settings
-from app.schemas import ErrorResponse, InvariantViolationError
+from app.schemas import ErrorResponse
 
 
 class HealthResponse(BaseModel):
@@ -30,12 +39,12 @@ app = FastAPI(
     title="Victor Tracker API",
     version="0.3.0",
     description=(
-        "Victor Tracker's backend, across every shipped iteration. Content Calendar's contract "
-        "is specs/001-content-calendar/contracts/openapi.yaml; presentation preferences (theme, "
-        "sound) are specs/002-pixel-arcade-skin/contracts/openapi.yaml; the Travel Map — Trip, "
-        "Destination and photograph routes — is specs/003-travel-map/contracts/openapi.yaml. "
-        "Each is the source of truth for its own resources — if this generated document "
-        "disagrees with one, the code is what is wrong."
+        "Victor Tracker's backend, across every shipped iteration. Presentation preferences "
+        "(theme, sound) are specs/002-pixel-arcade-skin/contracts/openapi.yaml; the Travel Map — "
+        "Trip, Destination and photograph routes — is specs/003-travel-map/contracts/openapi.yaml; "
+        "the Travel Schedule — TravelEvent routes — is "
+        "specs/travel-schedule/contracts/openapi.yaml. Each is the source of truth for its own "
+        "resources — if this generated document disagrees with one, the code is what is wrong."
     ),
     # Declared globally so the generated schema shows the flattened shape the handler below actually
     # returns, rather than FastAPI's own array-of-objects `HTTPValidationError`. Verified at T020:
@@ -82,28 +91,6 @@ async def flatten_validation_error(_request: Request, exc: RequestValidationErro
     )
 
 
-@app.exception_handler(InvariantViolationError)
-async def render_invariant_violation(
-    _request: Request, exc: InvariantViolationError
-) -> JSONResponse:
-    """The contract's `InvariantError`: a 409 carrying `code` alongside `detail`.
-
-    A handler rather than an `HTTPException`, because `HTTPException(detail={...})` nests the dict
-    as `{"detail": {"code": ..., "detail": ...}}` and there is no argument that produces a sibling
-    key.
-
-    This is the **only** error in the API whose body is not exactly `{"detail": "..."}`, and it is a
-    deliberate, contract-declared exception rather than a drift — `code` is what separates
-    `platform_required` from `platform_locked`, and those are two different instructions to the
-    creator. `tests/test_errors.py` allows the extra key on 409 and on nothing else, so a third
-    error shape cannot appear without a test failing.
-    """
-    return JSONResponse(
-        status_code=status.HTTP_409_CONFLICT,
-        content={"code": exc.code, "detail": exc.detail},
-    )
-
-
 app.add_middleware(
     CORSMiddleware,
     # Defence in depth only, and deliberately one exact origin rather than a regex. research.md
@@ -118,12 +105,13 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
-app.include_router(content_items.router)
 app.include_router(preferences.router)
 app.include_router(trips.router)
 app.include_router(destinations.router)
 app.include_router(locations.router)
 app.include_router(photographs.router)
+app.include_router(travel_events.router)
+app.include_router(ai.router)
 
 
 @app.get(

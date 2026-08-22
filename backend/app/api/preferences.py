@@ -4,10 +4,10 @@ Two operations, both scoped to the authenticated account's own row and taking no
 request (INV-1 in `specs/002-pixel-arcade-skin/data-model.md`): there is one creator, and the token
 names it.
 
-Unlike `content_items.py`, there is no invariant to check at this boundary — neither `theme` nor
-`sound_enabled` interacts with the other, and both are `NOT NULL` with a default, so there is no
-state the database can be asked to reach that is not already valid. `PreferencesUpdate`'s own
-validation (`minProperties: 1`, `additionalProperties: false`) does the whole job.
+There is no invariant to check at this boundary — neither `theme` nor `sound_enabled` interacts
+with the other, and both are `NOT NULL` with a default, so there is no state the database can be
+asked to reach that is not already valid. `PreferencesUpdate`'s own validation (`minProperties: 1`,
+`additionalProperties: false`) does the whole job.
 """
 
 from fastapi import APIRouter
@@ -51,7 +51,7 @@ def update_preferences(
     creator: CurrentCreator,
 ) -> Creator:
     """Partial update: an omitted key means "leave it" (contract: same semantics as
-    `PATCH /content-items/{id}`, minus the null-clears-it case — neither field here is nullable).
+    `PATCH /trips/{trip_id}` — neither field here is nullable).
 
     `exclude_unset=True` is what makes this partial rather than a full replacement: it yields only
     the fields the caller actually sent, so a request naming just `theme` cannot silently reset

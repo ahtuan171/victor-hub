@@ -30,8 +30,6 @@ export interface AllowlistEntry {
 export const PROXY_ALLOWLIST: readonly AllowlistEntry[] = [
   { path: "/auth/login", methods: ["POST"] },
   { path: "/auth/logout", methods: ["POST"] },
-  { path: "/content-items", methods: ["GET", "POST"] },
-  { path: "/content-items/{item_id}", methods: ["GET", "PATCH", "DELETE"] },
   // From specs/002-pixel-arcade-skin/contracts/openapi.yaml — a second contract file, not a second
   // API. proxy-allowlist.spec.ts reads both, per that file's header comment.
   { path: "/preferences", methods: ["GET", "PATCH"] },
@@ -47,6 +45,11 @@ export const PROXY_ALLOWLIST: readonly AllowlistEntry[] = [
   { path: "/destinations/{destination_id}/photos", methods: ["POST"] },
   { path: "/destinations/{destination_id}/photos/upload-url", methods: ["POST"] },
   { path: "/destinations/{destination_id}/photos/{photo_id}", methods: ["DELETE"] },
+  // From specs/travel-schedule/contracts/openapi.yaml — Module 02, built outside the speckit
+  // workflow (see that file's own header comment). Every operation below is called from the
+  // browser (frontend/lib/api.ts's listTravelEvents/createTravelEvent/etc.).
+  { path: "/travel-events", methods: ["GET", "POST"] },
+  { path: "/travel-events/{event_id}", methods: ["GET", "PATCH", "DELETE"] },
 ];
 
 export interface ExcludedOperation {
@@ -72,7 +75,7 @@ export const NOT_PROXIED: readonly ExcludedOperation[] = [
 /**
  * Patterns for the `{param}` segments appearing in allowlisted templates.
  *
- * Anchored, and narrower than "any segment" on purpose. `item_id` is `type: integer` in the
+ * Anchored, and narrower than "any segment" on purpose. `trip_id` is `type: integer` in the
  * contract, so a digits-only pattern is both faithful and the thing that makes `..` or an encoded
  * slash structurally unable to reach the backend as a path — every other segment is matched
  * against a literal.
@@ -80,10 +83,10 @@ export const NOT_PROXIED: readonly ExcludedOperation[] = [
  * The contract test asserts this table covers every parameter the contract declares.
  */
 export const PARAM_PATTERNS: Readonly<Record<string, RegExp>> = {
-  item_id: /^[0-9]+$/,
   trip_id: /^[0-9]+$/,
   destination_id: /^[0-9]+$/,
   photo_id: /^[0-9]+$/,
+  event_id: /^[0-9]+$/,
 };
 
 type SegmentMatcher = { readonly literal: string } | { readonly param: string; readonly pattern: RegExp };

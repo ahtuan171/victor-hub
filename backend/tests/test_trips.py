@@ -16,6 +16,9 @@ TRIPS_PATH = "/trips"
 CONTRACTED_TRIP_KEYS = {
     "id",
     "name",
+    # Module 02 (Travel Schedule) additions — both nullable, see `TripRead` in `app/schemas.py`.
+    "destination",
+    "notes",
     "start_date",
     "end_date",
     "status",

@@ -36,7 +36,7 @@ test("the redirect is served as a redirect, before any markup exists", async ({ 
   expect(response.headers()["location"]).toContain("/login");
 });
 
-test("a visitor holding a session cookie is sent to the calendar", async ({
+test("a visitor holding a session cookie is sent to the map", async ({
   page,
   context,
   baseURL,
@@ -51,11 +51,20 @@ test("a visitor holding a session cookie is sent to the calendar", async ({
       url: baseURL!,
     },
   ]);
+  // `/map` loads Destinations and Trips on mount — stubbed so a real backend left running locally
+  // cannot 401 these requests and bounce this test back to `/login`.
+  await page.route("**/api/destinations*", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await page.route("**/api/trips*", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
 
   await page.goto("/");
 
-  // `/calendar` does not exist until T033, so this asserts the destination, not a rendered page.
-  expect(new URL(page.url()).pathname).toBe("/calendar");
+  // The signed-in landing target moved from `/calendar` to `/map` 2026-08-22, when Content
+  // Calendar was removed entirely — the owner's instruction.
+  expect(new URL(page.url()).pathname).toBe("/map");
 });
 
 test("an empty session cookie is not a session", async ({ page, context, baseURL }) => {

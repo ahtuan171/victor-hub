@@ -89,14 +89,14 @@ test.describe("the allowlist gate", () => {
   });
 
   test("a method the contract does not give that path returns 404", async () => {
-    const response = await DELETE(...requestFor("DELETE", ["content-items"]));
+    const response = await DELETE(...requestFor("DELETE", ["trips"]));
 
     expect(response.status).toBe(404);
     expect(captured).toBeNull();
   });
 
   test("a non-integer item id returns 404", async () => {
-    const response = await GET(...requestFor("GET", ["content-items", ".."]));
+    const response = await GET(...requestFor("GET", ["trips", ".."]));
 
     expect(response.status).toBe(404);
     expect(captured).toBeNull();
@@ -105,7 +105,7 @@ test.describe("the allowlist gate", () => {
 
 test.describe("attaching the credential", () => {
   test("the cookie becomes a bearer header and is not forwarded as a cookie", async () => {
-    await GET(...requestFor("GET", ["content-items"], { cookie: "the-token" }));
+    await GET(...requestFor("GET", ["trips"], { cookie: "the-token" }));
 
     expect(captured?.headers.get("authorization")).toBe("Bearer the-token");
     expect(captured?.headers.get("cookie"), "the session cookie must not reach the backend").toBeNull();
@@ -117,24 +117,24 @@ test.describe("attaching the credential", () => {
       headers: { "content-type": "application/json" },
     });
 
-    const response = await GET(...requestFor("GET", ["content-items"]));
+    const response = await GET(...requestFor("GET", ["trips"]));
 
     expect(captured?.headers.get("authorization")).toBeNull();
     expect(response.status).toBe(401);
   });
 
   test("the query string and body survive the hop", async () => {
-    await GET(...requestFor("GET", ["content-items"], { search: "?scheduled=none&platform=tiktok" }));
-    expect(captured?.url).toBe(`${UPSTREAM}/content-items?scheduled=none&platform=tiktok`);
+    await GET(...requestFor("GET", ["trips"], { search: "?scheduled=none&platform=tiktok" }));
+    expect(captured?.url).toBe(`${UPSTREAM}/trips?scheduled=none&platform=tiktok`);
 
-    await POST(...requestFor("POST", ["content-items"], { body: '{"title":"an idea"}' }));
+    await POST(...requestFor("POST", ["trips"], { body: '{"title":"an idea"}' }));
     expect(captured?.body).toBe('{"title":"an idea"}');
     expect(captured?.headers.get("content-type")).toBe("application/json");
   });
 
   test("a path parameter reaches the backend as written", async () => {
-    await PATCH(...requestFor("PATCH", ["content-items", "42"], { body: '{"status":"posted"}' }));
-    expect(captured?.url).toBe(`${UPSTREAM}/content-items/42`);
+    await PATCH(...requestFor("PATCH", ["trips", "42"], { body: '{"status":"posted"}' }));
+    expect(captured?.url).toBe(`${UPSTREAM}/trips/42`);
   });
 });
 
@@ -146,7 +146,7 @@ test.describe("sliding reissue", () => {
       headers: { "content-type": "application/json", "x-access-token": token },
     });
 
-    const response = await GET(...requestFor("GET", ["content-items"], { cookie: "the-old-token" }));
+    const response = await GET(...requestFor("GET", ["trips"], { cookie: "the-old-token" }));
 
     expect(response.headers.get("x-access-token"), "the reissue header reached the browser").toBeNull();
 
@@ -164,7 +164,7 @@ test.describe("sliding reissue", () => {
   test("no header means the cookie is left alone", async () => {
     reply = new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } });
 
-    const response = await GET(...requestFor("GET", ["content-items"], { cookie: "the-token" }));
+    const response = await GET(...requestFor("GET", ["trips"], { cookie: "the-token" }));
 
     expect(response.cookies.get("ch_session")).toBeUndefined();
   });
@@ -310,7 +310,7 @@ test.describe("clearing the session", () => {
       headers: { "content-type": "application/json" },
     });
 
-    const response = await GET(...requestFor("GET", ["content-items"], { cookie: "expired" }));
+    const response = await GET(...requestFor("GET", ["trips"], { cookie: "expired" }));
 
     expect(response.cookies.get("ch_session")?.maxAge).toBe(0);
   });
@@ -320,7 +320,7 @@ test.describe("upstream failures", () => {
   test("an unreachable API is a 502 in the contracted error shape", async () => {
     globalThis.fetch = (() => Promise.reject(new Error("ECONNREFUSED"))) as typeof fetch;
 
-    const response = await GET(...requestFor("GET", ["content-items"], { cookie: "the-token" }));
+    const response = await GET(...requestFor("GET", ["trips"], { cookie: "the-token" }));
 
     expect(response.status).toBe(502);
     expect(Object.keys(await response.json())).toEqual(["detail"]);
@@ -329,7 +329,7 @@ test.describe("upstream failures", () => {
   test("a 204 is relayed without a body", async () => {
     reply = new Response(null, { status: 204 });
 
-    const response = await DELETE(...requestFor("DELETE", ["content-items", "42"], { cookie: "the-token" }));
+    const response = await DELETE(...requestFor("DELETE", ["trips", "42"], { cookie: "the-token" }));
 
     expect(response.status).toBe(204);
     expect(await response.text()).toBe("");

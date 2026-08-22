@@ -1,16 +1,17 @@
 openapi: 3.1.0
 
 info:
-  title: Victor Tracker — Content Calendar API
-  version: 0.1.0
+  title: Victor Tracker — Auth & Health API
+  version: 0.2.0
   description: |
-    Eight operations across five paths. Two are public — health and login — and the other six require
-    a token.
-
-    The count is a constitution principle III check, not a coincidence: this module ships CRUD plus
-    one capability (the status pipeline view), and the pipeline view needs no endpoint of its own
-    because it is a rendering of the list response. If an operation appears here that is not CRUD or
-    auth, that is scope drift.
+    **Content Calendar (`content-items`) was removed 2026-08-22** — route, components, backend
+    API, model, and data, the owner's explicit instruction. This file, originally
+    "Content Calendar API", now holds only what survived: `/health` and `/auth/*`, both still
+    load-bearing — `frontend/lib/proxy-allowlist.ts` and its own contract test
+    (`proxy-allowlist.spec.ts`) still read this file for those two paths, and `Error` is still the
+    uniform 4xx shape every other contract in this project references (`backend/AGENTS.md`).
+    Kept rather than deleted for that reason — see that test's own header comment on why a
+    contract file has to exist for every proxied operation.
 
     Auth is a bearer token. The browser never holds it — the Next.js proxy attaches it server-side
     from an httpOnly cookie (see research.md R-001), which is why this contract shows a plain
@@ -43,7 +44,6 @@ servers:
 
 tags:
   - name: auth
-  - name: content-items
 
 security:
   - bearerAuth: []
@@ -140,201 +140,6 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthenticated"
 
-  /content-items:
-    get:
-      tags: [content-items]
-      summary: List content items
-      description: |
-        Returns every field needed to render a status cue and a platform cue, so the calendar never
-        makes a follow-up request per item (FR-017, FR-018).
-
-        Every parameter below is optional and every one of them narrows. The calendar surface sends
-        **none** of them, and the reason is general rather than a property of any one parameter:
-        each narrows what the *server* returns, and the calendar and the backlog drawer read the
-        **same loaded state** (research.md R-007) — so any parameter sent here narrows both surfaces
-        at once, and the drawer has no way to get back what the grid's query excluded.
-
-        What each one would cost concretely: `date_from`/`date_to` bound `scheduled_date`, so a
-        ranged read returns no undated rows and empties the backlog; `platform` bounds the platform
-        column, so a filtered read hides every unplatformed idea — which US4 scenario 4 requires be
-        reachable by clearing the filter. **This rule holds for any parameter added later**, whatever
-        column it bounds; it is not a statement about `scheduled_date`. It said so until T060, when
-        `platform` became the first parameter that narrows on something else.
-
-        A caller that wants only the backlog sends `scheduled=none`; a caller that wants a date
-        window sends `date_from`/`date_to`; a caller that wants one platform sends `platform`. The
-        calendar is none of them — it reads the whole list once and narrows client-side.
-      parameters:
-        - name: scheduled
-          in: query
-          description: |
-            `none` returns only undated items — the backlog drawer (FR-011). Omitted returns both
-            dated and undated, which is what the calendar surface loads.
-          schema:
-            type: string
-            enum: [none]
-        - name: date_from
-          in: query
-          description: Inclusive lower bound on scheduled_date (FR-013).
-          schema:
-            type: string
-            format: date
-        - name: date_to
-          in: query
-          description: Inclusive upper bound on scheduled_date (FR-013).
-          schema:
-            type: string
-            format: date
-        - name: platform
-          in: query
-          description: |
-            Restrict to one platform (FR-016). Items with no platform are excluded when this is
-            set — matching the spec's US4 scenario 4.
-          schema:
-            $ref: "#/components/schemas/Platform"
-      responses:
-        "200":
-          description: Matching items, newest-created first
-          headers:
-            X-Access-Token:
-              $ref: "#/components/headers/XAccessToken"
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/ContentItem"
-        "401":
-          $ref: "#/components/responses/Unauthenticated"
-
-    post:
-      tags: [content-items]
-      summary: Create a content item
-      description: |
-        Title is the only required field (FR-005).
-
-        `status` and `platform` are accepted here, so INV-1 is reachable on create as well as on
-        update: `{"title": "x", "status": "draft"}` with no platform must be refused with 409, not
-        allowed through to the database where the CHECK constraint would surface as a 500.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ContentItemCreate"
-      responses:
-        "201":
-          description: Created
-          headers:
-            X-Access-Token:
-              $ref: "#/components/headers/XAccessToken"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ContentItem"
-        "401":
-          $ref: "#/components/responses/Unauthenticated"
-        "409":
-          description: |
-            The item as submitted would violate INV-1 — a status past `idea` with no platform set.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/InvariantError"
-        "422":
-          $ref: "#/components/responses/ValidationError"
-
-  /content-items/{item_id}:
-    parameters:
-      - name: item_id
-        in: path
-        required: true
-        schema:
-          type: integer
-
-    get:
-      tags: [content-items]
-      summary: Fetch one content item
-      responses:
-        "200":
-          description: The item
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ContentItem"
-        "401":
-          $ref: "#/components/responses/Unauthenticated"
-        "404":
-          $ref: "#/components/responses/NotFound"
-
-    patch:
-      tags: [content-items]
-      summary: Partially update a content item
-      description: |
-        The single mutation endpoint behind every date and status change.
-
-        For a **scheduled date** there are two entry points and they produce the identical request
-        with one field set — a drag onto a day and the item sheet's date control (FR-014a). That is
-        what makes "both paths produce an identical result" true by construction rather than by
-        discipline.
-
-        For a **status** there is one entry point: a tap. FR-015a was amended in the post-review
-        clarification to make status tap-only — a status drag has nowhere to drop at 375px without
-        the horizontal scroll FR-021 forbids, and status lanes are a second core capability that
-        constitution principle III does not permit this module. Do not read the paragraph above as
-        implying a status drag exists.
-
-        Omitted fields are untouched. Explicit null clears a field, subject to the invariants:
-        clearing `platform` while status is past `idea` is refused (FR-009a), and `published_url`
-        is never cleared as a side effect of anything (FR-019a).
-
-        Concurrent writes resolve last-write-wins with no version check (FR-023a).
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ContentItemUpdate"
-      responses:
-        "200":
-          description: Updated
-          headers:
-            X-Access-Token:
-              $ref: "#/components/headers/XAccessToken"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ContentItem"
-        "401":
-          $ref: "#/components/responses/Unauthenticated"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          description: |
-            The change would violate an invariant. Two cases, distinguished by `code`:
-            advancing past `idea` with no platform set, or clearing the platform of an item that is
-            already past `idea`.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/InvariantError"
-        "422":
-          $ref: "#/components/responses/ValidationError"
-
-    delete:
-      tags: [content-items]
-      summary: Delete a content item
-      description: |
-        Hard delete. The confirmation required by FR-020 is a frontend concern — the API does not
-        second-guess a caller that has already confirmed.
-      responses:
-        "204":
-          description: Deleted
-        "401":
-          $ref: "#/components/responses/Unauthenticated"
-        "404":
-          $ref: "#/components/responses/NotFound"
-
 components:
   securitySchemes:
     bearerAuth:
@@ -354,167 +159,6 @@ components:
         type: string
 
   schemas:
-    Status:
-      type: string
-      enum: [idea, draft, posted]
-      description: FR-007. Exactly three states; `overdue` is derived at render time, never stored.
-
-    Platform:
-      type: string
-      enum: [tiktok, instagram, youtube]
-      description: FR-010. Closed set, not creator-editable.
-
-    ContentItem:
-      type: object
-      required: [id, title, status, created_at, updated_at]
-      properties:
-        id:
-          type: integer
-        title:
-          type: string
-          minLength: 1
-          maxLength: 200
-        hook:
-          type: [string, "null"]
-          maxLength: 500
-        platform:
-          oneOf:
-            - $ref: "#/components/schemas/Platform"
-            - type: "null"
-        scheduled_date:
-          type: [string, "null"]
-          format: date
-          description: |
-            Date only, no time and no timezone (FR-012a). Serialised YYYY-MM-DD. Null means the
-            item lives in the backlog (FR-011).
-        status:
-          $ref: "#/components/schemas/Status"
-        published_url:
-          type: [string, "null"]
-          format: uri
-          maxLength: 2048
-          pattern: "^https?://"
-          description: |
-            The link to the live post, pasted by hand (FR-019). Retained when the item leaves
-            `posted`, and removable only by the creator sending an explicit null (FR-019a).
-
-            **`pattern` and `maxLength` are the enforced rules; `format` is annotation only.**
-            `format: uri` is a JSON Schema annotation that validators need not enforce, and this API
-            does not enforce it — so `https://` with nothing after it is **accepted**, deliberately
-            (pinned by `test_the_scheme_allowlist_does_not_check_the_rest_of_the_url`). A client
-            MUST NOT be stricter than this: `new URL()` and an `<input type="url">`'s native
-            validity both reject that value, and refusing what this API stores is drift no backend
-            test can see. Tightening the rule means amending this file first.
-
-            Surrounding whitespace is **stripped before** the pattern and the length are applied,
-            so a link pasted from a phone with a stray space or newline is accepted and stored
-            trimmed. A client mirroring this check must trim first for the same reason.
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
-
-    ContentItemCreate:
-      type: object
-      required: [title]
-      properties:
-        title:
-          type: string
-          minLength: 1
-          maxLength: 200
-        hook:
-          type: [string, "null"]
-          maxLength: 500
-        platform:
-          oneOf:
-            - $ref: "#/components/schemas/Platform"
-            - type: "null"
-        scheduled_date:
-          type: [string, "null"]
-          format: date
-        status:
-          $ref: "#/components/schemas/Status"
-          default: idea
-        published_url:
-          type: [string, "null"]
-          format: uri
-          maxLength: 2048
-          pattern: "^https?://"
-          description: |
-            The link to the live post, pasted by hand (FR-019). Retained when the item leaves
-            `posted`, and removable only by the creator sending an explicit null (FR-019a).
-
-            **`pattern` and `maxLength` are the enforced rules; `format` is annotation only.**
-            `format: uri` is a JSON Schema annotation that validators need not enforce, and this API
-            does not enforce it — so `https://` with nothing after it is **accepted**, deliberately
-            (pinned by `test_the_scheme_allowlist_does_not_check_the_rest_of_the_url`). A client
-            MUST NOT be stricter than this: `new URL()` and an `<input type="url">`'s native
-            validity both reject that value, and refusing what this API stores is drift no backend
-            test can see. Tightening the rule means amending this file first.
-
-            Surrounding whitespace is **stripped before** the pattern and the length are applied,
-            so a link pasted from a phone with a stray space or newline is accepted and stored
-            trimmed. A client mirroring this check must trim first for the same reason.
-
-    ContentItemUpdate:
-      type: object
-      minProperties: 1
-      description: Every field optional; omitted means untouched, explicit null means clear.
-      properties:
-        title:
-          type: string
-          minLength: 1
-          maxLength: 200
-        hook:
-          type: [string, "null"]
-          maxLength: 500
-        platform:
-          oneOf:
-            - $ref: "#/components/schemas/Platform"
-            - type: "null"
-        scheduled_date:
-          type: [string, "null"]
-          format: date
-        status:
-          $ref: "#/components/schemas/Status"
-        published_url:
-          type: [string, "null"]
-          format: uri
-          maxLength: 2048
-          pattern: "^https?://"
-          description: |
-            The link to the live post, pasted by hand (FR-019). Retained when the item leaves
-            `posted`, and removable only by the creator sending an explicit null (FR-019a).
-
-            **`pattern` and `maxLength` are the enforced rules; `format` is annotation only.**
-            `format: uri` is a JSON Schema annotation that validators need not enforce, and this API
-            does not enforce it — so `https://` with nothing after it is **accepted**, deliberately
-            (pinned by `test_the_scheme_allowlist_does_not_check_the_rest_of_the_url`). A client
-            MUST NOT be stricter than this: `new URL()` and an `<input type="url">`'s native
-            validity both reject that value, and refusing what this API stores is drift no backend
-            test can see. Tightening the rule means amending this file first.
-
-            Surrounding whitespace is **stripped before** the pattern and the length are applied,
-            so a link pasted from a phone with a stray space or newline is accepted and stored
-            trimmed. A client mirroring this check must trim first for the same reason.
-
-    InvariantError:
-      type: object
-      required: [code, detail]
-      properties:
-        code:
-          type: string
-          enum: [platform_required, platform_locked]
-          description: |
-            `platform_required` — cannot advance past `idea` without a platform (FR-009).
-            `platform_locked` — cannot clear the platform while past `idea`; move the item back to
-            `idea` first (FR-009a).
-        detail:
-          type: string
-          description: Human-readable message the frontend can surface verbatim.
-
     Error:
       type: object
       required: [detail]
@@ -533,13 +177,6 @@ components:
 
     InvalidCredentials:
       description: Email or password incorrect. The message does not reveal which.
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/Error"
-
-    NotFound:
-      description: No such item.
       content:
         application/json:
           schema:

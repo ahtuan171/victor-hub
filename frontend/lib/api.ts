@@ -28,9 +28,9 @@
  * non-`NEXT_PUBLIC_` variables and a client bundle would get silent fallbacks.
  *
  * **003-travel-map (T009) adds every `/trips`, `/destinations`, `/locations` and per-destination
- * photograph operation from `specs/003-travel-map/contracts/openapi.yaml`** below the 001/002
- * operations above — a new, standalone resource space, not a delta on `ContentItem`. Same rules:
- * hand-written from the contract, same transport, same 401 handling.
+ * photograph operation from `specs/003-travel-map/contracts/openapi.yaml`** below the 002
+ * operations above — a new, standalone resource space. Same rules: hand-written from the
+ * contract, same transport, same 401 handling.
  */
 
 /** Everything this client talks to. Same-origin by construction — see note 1 above. */
@@ -51,19 +51,7 @@ const SESSION_LIFECYCLE_PATHS = ["/auth/login", "/auth/logout"] as const;
 
 // --- Contract schemas -----------------------------------------------------------------------
 // Written as `as const` arrays rather than TypeScript enums so the runtime values exist for the
-// contract test to compare against openapi.yaml, and so `Status[]` is iterable for the UI.
-
-/** `Status` in the contract. FR-007 — exactly three; `overdue` is derived at render, never stored. */
-export const STATUSES = ["idea", "draft", "posted"] as const;
-export type Status = (typeof STATUSES)[number];
-
-/** `Platform` in the contract. FR-010 — a closed set, not creator-editable. */
-export const PLATFORMS = ["tiktok", "instagram", "youtube"] as const;
-export type Platform = (typeof PLATFORMS)[number];
-
-/** `InvariantError.code`. Both arrive on a 409; only `platform_required` is reachable from create. */
-export const INVARIANT_CODES = ["platform_required", "platform_locked"] as const;
-export type InvariantCode = (typeof INVARIANT_CODES)[number];
+// contract test to compare against openapi.yaml, and so a set of them is iterable for the UI.
 
 /**
  * `Theme` in `specs/002-pixel-arcade-skin/contracts/openapi.yaml`. FR-010 — exactly two, `dark`
@@ -76,8 +64,8 @@ export type Theme = (typeof THEMES)[number];
 
 /**
  * `Preferences` in `specs/002-pixel-arcade-skin/contracts/openapi.yaml` — both fields always
- * present, never omitted (unlike `ContentItem`'s nullable four, these are `NOT NULL` with a
- * default, so there is no absent state to normalise on the way in).
+ * present, never omitted: they are `NOT NULL` with a default, so there is no absent state to
+ * normalise on the way in.
  */
 export interface Preferences {
   readonly theme: Theme;
@@ -86,10 +74,9 @@ export interface Preferences {
 
 /**
  * `PreferencesUpdate` — at least one key, per the contract's `minProperties: 1`, which TypeScript
- * has no way to express here any more than `ContentItemUpdate` could (the backend answers 422
- * rather than treating an empty body as a silent no-op). Neither field is nullable — clearing a
- * theme or a sound choice has no meaning — so unlike `ContentItemUpdate` there is no `| null` to
- * keep apart from an omitted key.
+ * has no way to express here (the backend answers 422 rather than treating an empty body as a
+ * silent no-op). Neither field is nullable — clearing a theme or a sound choice has no meaning —
+ * so there is no `| null` to keep apart from an omitted key.
  */
 export interface PreferencesUpdate {
   readonly theme?: Theme;
@@ -120,14 +107,20 @@ export const TRIP_STATUSES = [
 ] as const;
 export type TripStatus = (typeof TRIP_STATUSES)[number];
 
-/** `Trip` in the contract. */
+/**
+ * `Trip` in the contract. `destination` and `notes` are Module 02 (Travel Schedule) additions —
+ * built from `Module_02_Travel_Schedule_Spec.md` rather than a ratified `spec.md`, both nullable
+ * so a Trip created before this iteration reads back with both null, not broken.
+ */
 export interface Trip {
   readonly id: number;
   readonly name: string;
-  /** `YYYY-MM-DD`. Never hand this to `new Date` — see `ContentItem.scheduled_date` above. */
+  readonly destination: string | null;
+  /** `YYYY-MM-DD`. Never hand this to `new Date` — see `lib/dates.ts`. */
   readonly start_date: string;
   readonly end_date: string;
   readonly status: TripStatus;
+  readonly notes: string | null;
   readonly created_at: string;
   readonly updated_at: string;
 }
@@ -135,28 +128,32 @@ export interface Trip {
 /** `TripCreate` in the contract. `name`/`start_date`/`end_date` are required (FR-014). */
 export interface TripCreate {
   readonly name: string;
+  readonly destination?: string | null;
   readonly start_date: string;
   readonly end_date: string;
   readonly status?: TripStatus;
+  readonly notes?: string | null;
 }
 
 /**
- * `TripUpdate` in the contract: every field optional, and — unlike `DestinationUpdate` below —
- * **none nullable**. `trip`'s columns are all `NOT NULL` (data-model.md), so there is no `| null`
- * spelling here the way there is for `ContentItem`'s clearable fields; the backend refuses an
- * explicit `null` on any of these with a 422.
+ * `TripUpdate` in the contract: every field optional. `name`/`start_date`/`end_date`/`status`
+ * back `NOT NULL` columns (data-model.md) and have no null spelling — the backend refuses an
+ * explicit `null` on any of those with a 422. `destination`/`notes` are the exception: both are
+ * genuinely nullable columns, so either may be sent as `null` to clear it.
  */
 export interface TripUpdate {
   readonly name?: string;
+  readonly destination?: string | null;
   readonly start_date?: string;
   readonly end_date?: string;
   readonly status?: TripStatus;
+  readonly notes?: string | null;
 }
 
 /**
  * `Destination` in the contract. `trip_id`/`start_date`/`end_date` are the contract's
- * optional-but-nullable trio (parallel to `ContentItem`'s four) — typed present-and-nullable here,
- * with `toDestination` making that true on the way in.
+ * optional-but-nullable trio — typed present-and-nullable here, with `toDestination` making that
+ * true on the way in.
  */
 export interface Destination {
   readonly id: number;
@@ -203,10 +200,10 @@ export interface DestinationCreate {
 }
 
 /**
- * `DestinationUpdate` in the contract — a **mixed** null-spelling rule, the same shape
- * `ContentItemUpdate` uses above. `trip_id` (FR-020's detach), `start_date`, `end_date` and `note`
- * may be sent as explicit `null` to clear them; `name`, `latitude`, `longitude` and `status` back
- * `NOT NULL` columns and have no null spelling — the backend refuses one with a 422.
+ * `DestinationUpdate` in the contract — a **mixed** null-spelling rule. `trip_id` (FR-020's
+ * detach), `start_date`, `end_date` and `note` may be sent as explicit `null` to clear them;
+ * `name`, `latitude`, `longitude` and `status` back `NOT NULL` columns and have no null spelling —
+ * the backend refuses one with a 422.
  */
 export interface DestinationUpdate {
   readonly trip_id?: number | null;
@@ -261,86 +258,88 @@ export interface LocationCandidate {
   readonly longitude: number;
 }
 
+// --- Module 02 (Travel Schedule) -------------------------------------------------------------
+//
+// Built from `Module_02_Travel_Schedule_Spec.md` rather than a ratified `spec.md` — see the
+// owner's explicit instruction recorded in this iteration's history to bypass the speckit
+// workflow for this module.
+
 /**
- * `ContentItem` in the contract.
- *
- * The four nullable fields are **not** in the contract's `required` list, so a response may omit
- * them rather than send null. They are typed as present-and-nullable here and `toContentItem`
- * makes that true on the way in — the alternative is `hook?: string | null`, which pushes a
- * `?? null` onto every read site in the calendar and the drawer for no gain.
- *
- * `scheduled_date` is a `YYYY-MM-DD` string and stays one. Never hand it to `new Date` — that
- * parses as UTC midnight and renders as the previous day west of Greenwich (research.md R-006).
- * eslint enforces this; `lib/dates.ts` is where date handling lives.
+ * `TravelEventType` in `app/models.py`. The five kinds of dated entry a Trip carries (§8/§15).
+ * Deliberately excludes `trip`: a Trip is its own resource with its own date range, and the
+ * calendar's `◆` marker is drawn from that range directly — see `lib/schedule.ts`.
  */
-export interface ContentItem {
+export const TRAVEL_EVENT_TYPES = ["transport", "stay", "activity", "food", "note"] as const;
+export type TravelEventType = (typeof TRAVEL_EVENT_TYPES)[number];
+
+/**
+ * `TravelEvent` in `app/schemas.py`'s `TravelEventRead`. The type-specific fields are a fixed
+ * set of nullable columns rather than a JSON blob (§14 — transport uses `from_location`/
+ * `to_location`, stay/transport use `booking_reference`, activity uses `category`, and so on);
+ * which fields a given `event_type` actually uses is a form-layer concern, not something this
+ * type enforces.
+ */
+export interface TravelEvent {
   readonly id: number;
+  readonly trip_id: number | null;
+  readonly event_type: TravelEventType;
   readonly title: string;
-  readonly hook: string | null;
-  readonly platform: Platform | null;
-  /** Date only, no time and no timezone (FR-012a). Null means the item is in the backlog. */
-  readonly scheduled_date: string | null;
-  readonly status: Status;
-  readonly published_url: string | null;
+  /** `YYYY-MM-DD`. Never hand this to `new Date` — see `lib/dates.ts`. */
+  readonly event_date: string;
+  /** `HH:MM:SS`, advisory display only — no timezone, no ordering derived from it. */
+  readonly start_time: string | null;
+  readonly location: string | null;
+  readonly from_location: string | null;
+  readonly to_location: string | null;
+  readonly booking_reference: string | null;
+  readonly category: string | null;
+  readonly notes: string | null;
   readonly created_at: string;
   readonly updated_at: string;
 }
 
-/**
- * `ContentItemCreate` in the contract. Title is the only required field (FR-005) — that is the
- * whole point of the capture sheet at T034, and any second required field is friction enough to
- * send the creator back to a notes app.
- */
-export interface ContentItemCreate {
+/** `TravelEventCreate`. `event_type`/`title`/`event_date` are required; everything else optional. */
+export interface TravelEventCreate {
+  readonly trip_id?: number | null;
+  readonly event_type: TravelEventType;
   readonly title: string;
-  readonly hook?: string | null;
-  readonly platform?: Platform | null;
-  readonly scheduled_date?: string | null;
-  readonly status?: Status;
-  readonly published_url?: string | null;
+  readonly event_date: string;
+  readonly start_time?: string | null;
+  readonly location?: string | null;
+  readonly from_location?: string | null;
+  readonly to_location?: string | null;
+  readonly booking_reference?: string | null;
+  readonly category?: string | null;
+  readonly notes?: string | null;
 }
 
 /**
- * `ContentItemUpdate` in the contract — every field optional, and *optional* means two things.
- *
- * **This type is why `exactOptionalPropertyTypes` is on** (see `frontend/AGENTS.md`). The backend
- * reads `model_dump(exclude_unset=True)`, so it distinguishes a key that was **omitted** — leave the
- * stored value alone — from one set to **explicit null** — clear it. `JSON.stringify` drops
- * `undefined` values, so those two intentions are two different requests, and without the flag
- * `{ platform: undefined }` would be assignable to `platform?: Platform | null` and collapse them.
- *
- * So the spelling below is load-bearing: `platform?: Platform | null`, never `| undefined`. Under
- * the flag a caller cannot pass an explicit `undefined` at all, which means an own property here is
- * always a field the caller meant to write.
- *
- * Two fields have no null spelling, and the contract agrees: `title` is `NOT NULL` with INV-2
- * forbidding an empty one, and `status` is `NOT NULL` with a default, so "clear the status" has no
- * meaning. Both `$ref` their type directly in `openapi.yaml` while every nullable field is a union
- * with `"null"`.
- *
- * The contract's `minProperties: 1` is not expressed here — TypeScript has no way to say it, and
- * the backend answers 422 rather than treating an empty body as a silent no-op 200.
+ * `TravelEventUpdate`: every field optional and every field nullable — unlike `TripUpdate`,
+ * `travel_event` has no `NOT NULL` column beyond `event_type`/`title`/`event_date`, and the
+ * backend's `TravelEventUpdate` places no "no null spelling" restriction on any of them.
  */
-export interface ContentItemUpdate {
+export interface TravelEventUpdate {
+  readonly trip_id?: number | null;
+  readonly event_type?: TravelEventType;
   readonly title?: string;
-  readonly hook?: string | null;
-  readonly platform?: Platform | null;
-  /** `YYYY-MM-DD`, or null to send the item back to the backlog (FR-014). */
-  readonly scheduled_date?: string | null;
-  readonly status?: Status;
-  readonly published_url?: string | null;
+  readonly event_date?: string;
+  readonly start_time?: string | null;
+  readonly location?: string | null;
+  readonly from_location?: string | null;
+  readonly to_location?: string | null;
+  readonly booking_reference?: string | null;
+  readonly category?: string | null;
+  readonly notes?: string | null;
 }
 
-/** Query parameters on `GET /content-items`. */
-export interface ListContentItemsParams {
-  /** `none` returns only undated items — the backlog drawer (FR-011). */
-  readonly scheduled?: "none";
-  /** Inclusive lower bound on `scheduled_date` (FR-013). `YYYY-MM-DD`. */
+/** Query parameters on `GET /travel-events`. */
+export interface ListTravelEventsParams {
+  readonly trip_id?: number;
+  readonly event_type?: TravelEventType;
+  /** Inclusive lower bound on `event_date`. */
   readonly date_from?: string;
-  /** Inclusive upper bound on `scheduled_date` (FR-013). `YYYY-MM-DD`. */
+  /** Inclusive upper bound on `event_date`. */
   readonly date_to?: string;
-  /** Restrict to one platform (FR-016). Items with no platform are excluded when set. */
-  readonly platform?: Platform;
 }
 
 export interface LoginRequest {
@@ -371,21 +370,16 @@ export interface LoginResult {
  * `detail` is safe to show verbatim: the contract makes every error body `{"detail": "<string>"}`
  * and the backend installs a handler that flattens FastAPI's validation array into one, so this
  * never renders `[object Object]`.
- *
- * `code` is present only on a 409 (`InvariantError`), which is how a caller distinguishes "needs a
- * platform first" from a generic conflict without matching on prose.
  */
 export class ApiError extends Error {
   readonly status: number;
   readonly detail: string;
-  readonly code: InvariantCode | null;
 
-  constructor(status: number, detail: string, code: InvariantCode | null = null) {
+  constructor(status: number, detail: string) {
     super(detail);
     this.name = "ApiError";
     this.status = status;
     this.detail = detail;
-    this.code = code;
   }
 }
 
@@ -420,74 +414,6 @@ export async function logout(): Promise<void> {
   }
 }
 
-/** List content items. Newest-created first (the contract's documented ordering). */
-export async function listContentItems(params: ListContentItemsParams = {}): Promise<ContentItem[]> {
-  const items = await request<unknown[]>("GET", `/content-items${queryString(params)}`);
-  return items.map(toContentItem);
-}
-
-/**
- * Create a content item.
- *
- * Throws `ApiError` with `code === "platform_required"` on a 409 — submitting a status past `idea`
- * with no platform (INV-1, FR-009).
- */
-export async function createContentItem(item: ContentItemCreate): Promise<ContentItem> {
-  return toContentItem(await request<unknown>("POST", "/content-items", { body: item }));
-}
-
-/**
- * Fetch one item.
- *
- * **No surface in v0.1 calls this on the happy path**, and that is not an oversight. R-007 holds
- * every item in client state loaded by one list read, so the item sheet at T052 opens on a row it
- * already has — refetching it would be a round trip to learn what is on screen, on a backend whose
- * free tier spins down. It exists because the contract declares it and because it is the honest
- * recovery for a surface that finds itself holding a stale row.
- *
- * Throws `ApiError` with `status === 404` for an id that does not exist.
- */
-export async function getContentItem(id: number): Promise<ContentItem> {
-  return toContentItem(await request<unknown>("GET", `/content-items/${id}`));
-}
-
-/**
- * Change some fields of an item (FR-023).
- *
- * The single mutation behind every edit: a tap in the item sheet (T052) and a drag onto a day
- * (T054) produce the identical request with one field set, which is what makes "both paths produce
- * an identical result" true by construction rather than by discipline.
- *
- * `changes` carries only what should change — see `ContentItemUpdate` for why an omitted field and
- * an explicit null are two different requests rather than two spellings of one.
- *
- * Throws `ApiError` on a 409 with `code === "platform_required"` (advancing past `idea` with no
- * platform) or `"platform_locked"` (clearing the platform of an item already past `idea`) — one
- * invariant, two codes, because the creator's next step differs (FR-009, FR-009a). T053 renders
- * both beside the platform control.
- */
-export async function updateContentItem(
-  id: number,
-  changes: ContentItemUpdate,
-): Promise<ContentItem> {
-  return toContentItem(await request<unknown>("PATCH", `/content-items/${id}`, { body: changes }));
-}
-
-/**
- * Delete an item. Hard delete, and the contract answers 204 with no body.
- *
- * **A missing id is a 404, not an idempotent 204** — settled at T050, and this client reports it
- * rather than swallowing it. Whether a 404 is benign is a question about a *screen* (T056 is
- * reconciling a view, not committing a transaction), and that judgement belongs to the surface that
- * knows what the creator was told, not to the transport.
- *
- * The confirmation FR-020 requires happens before this is called; the API does not second-guess a
- * caller that has already confirmed.
- */
-export async function deleteContentItem(id: number): Promise<void> {
-  await request<void>("DELETE", `/content-items/${id}`);
-}
-
 /**
  * Read the account's own presentation and sound choices (002 US3/US4).
  *
@@ -501,9 +427,8 @@ export function getPreferences(): Promise<Preferences> {
 }
 
 /**
- * Change one or both choices. Returns the **full** object, not the diff (same shape as
- * `updateContentItem`'s reasoning) — a caller never has to reconstruct the new state from what it
- * sent.
+ * Change one or both choices. Returns the **full** object, not the diff — a caller never has to
+ * reconstruct the new state from what it sent.
  */
 export function updatePreferences(changes: PreferencesUpdate): Promise<Preferences> {
   return request<Preferences>("PATCH", "/preferences", { body: changes });
@@ -534,10 +459,51 @@ export function updateTrip(id: number, changes: TripUpdate): Promise<Trip> {
 /**
  * Delete a Trip and every Destination that belongs to it (FR-018, `ON DELETE CASCADE`). The
  * confirmation naming what will be lost happens before this call — the API performs the delete
- * unconditionally once called, the same division `deleteContentItem` draws.
+ * unconditionally once called.
  */
 export async function deleteTrip(id: number): Promise<void> {
   await request<void>("DELETE", `/trips/${id}`);
+}
+
+// --- Module 02 (Travel Schedule) -------------------------------------------------------------
+
+/**
+ * List TravelEvents, optionally narrowed by Trip, type, or date range. No pagination — the same
+ * personal-volume reasoning `listTrips` states.
+ */
+export function listTravelEvents(params: ListTravelEventsParams = {}): Promise<TravelEvent[]> {
+  return request<TravelEvent[]>("GET", `/travel-events${travelEventsQueryString(params)}`);
+}
+
+/** Create a TravelEvent. `trip_id` is optional — an event may exist unattached to any Trip. */
+export function createTravelEvent(event: TravelEventCreate): Promise<TravelEvent> {
+  return request<TravelEvent>("POST", "/travel-events", { body: event });
+}
+
+/** Read one TravelEvent. Throws `ApiError` with `status === 404` for an id that does not exist. */
+export function getTravelEvent(id: number): Promise<TravelEvent> {
+  return request<TravelEvent>("GET", `/travel-events/${id}`);
+}
+
+/** Change one or more fields of a TravelEvent. */
+export function updateTravelEvent(id: number, changes: TravelEventUpdate): Promise<TravelEvent> {
+  return request<TravelEvent>("PATCH", `/travel-events/${id}`, { body: changes });
+}
+
+/** Delete a TravelEvent. */
+export async function deleteTravelEvent(id: number): Promise<void> {
+  await request<void>("DELETE", `/travel-events/${id}`);
+}
+
+/** `?trip_id=1&event_type=note&date_from=...` for the parameters that are set. */
+function travelEventsQueryString(params: ListTravelEventsParams): string {
+  const search = new URLSearchParams();
+  if (params.trip_id !== undefined) search.set("trip_id", String(params.trip_id));
+  if (params.event_type !== undefined) search.set("event_type", params.event_type);
+  if (params.date_from !== undefined) search.set("date_from", params.date_from);
+  if (params.date_to !== undefined) search.set("date_to", params.date_to);
+  const query = search.toString();
+  return query ? `?${query}` : "";
 }
 
 /**
@@ -724,47 +690,7 @@ async function toApiError(response: Response): Promise<ApiError> {
       ? body["detail"]
       : `Request failed with status ${response.status}.`;
 
-  const rawCode = isRecord(body) ? body["code"] : undefined;
-  const code = INVARIANT_CODES.find((candidate) => candidate === rawCode) ?? null;
-
-  return new ApiError(response.status, detail, code);
-}
-
-/**
- * Fill the contract's optional-but-nullable fields so `ContentItem` is true as declared.
- *
- * Deliberately not a validator: this client trusts the backend, which is the only thing that can
- * write these rows and is tested against the same contract. What it will not do is let `undefined`
- * reach a component typed to receive `null`.
- */
-function toContentItem(value: unknown): ContentItem {
-  const item = value as ContentItem & Partial<Record<keyof ContentItem, unknown>>;
-
-  return {
-    ...item,
-    hook: item.hook ?? null,
-    platform: item.platform ?? null,
-    scheduled_date: item.scheduled_date ?? null,
-    published_url: item.published_url ?? null,
-  };
-}
-
-/**
- * `?a=b` for the parameters that are set, and an empty string when none are.
- *
- * `exactOptionalPropertyTypes` stops a caller passing an explicit `undefined`, so an own property
- * here is a value the caller meant. The empty-string check is still worth keeping: `date_from=`
- * is a parameter the backend has to interpret, and it means nothing.
- */
-function queryString(params: ListContentItemsParams): string {
-  const search = new URLSearchParams();
-
-  for (const [key, value] of Object.entries(params)) {
-    if (typeof value === "string" && value.length > 0) search.set(key, value);
-  }
-
-  const query = search.toString();
-  return query === "" ? "" : `?${query}`;
+  return new ApiError(response.status, detail);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -772,8 +698,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Fill `Destination`'s optional-but-nullable trio so the type is true as declared — the same
- * reasoning and the same trust boundary as `toContentItem` above.
+ * Fill `Destination`'s optional-but-nullable trio so the type is true as declared.
  */
 function toDestination(value: unknown): Destination {
   const row = value as Destination & Partial<Record<keyof Destination, unknown>>;

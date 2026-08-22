@@ -84,6 +84,18 @@ class Settings(BaseSettings):
         "section.",
     )
 
+    hf_token: str = Field(
+        default="",
+        description="Hugging Face access token for Travel Intelligence inference. Empty means the "
+        "AI module answers with a message naming this variable rather than failing obscurely.",
+    )
+
+    hf_model: str = Field(
+        default="Qwen/Qwen2.5-7B-Instruct",
+        description="Model id sent to the Hugging Face router. Must be served by at least one "
+        "inference provider; a model with none answers 404.",
+    )
+
 
 @lru_cache
 def get_settings() -> Settings:

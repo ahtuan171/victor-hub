@@ -1,0 +1,192 @@
+openapi: 3.1.0
+
+info:
+  title: Victor Tracker — Travel Schedule API (Module 02)
+  version: 0.1.0
+  description: |
+    **Not a ratified spec.md contract.** Module 02 (Travel Schedule) was built from
+    `Module_02_Travel_Schedule_Spec.md` (a loose draft, not a `specs/<NNN>-name/spec.md`) at the
+    owner's explicit instruction to bypass the speckit workflow for this module — no
+    `/speckit-specify` run, no ratified `spec.md`, no numbered iteration.
+
+    This file exists for one narrow reason: `frontend/lib/proxy-allowlist.ts` and
+    `frontend/tests/contract/proxy-allowlist.spec.ts` treat "the contract" as the source of truth
+    for which backend operations may cross the Next.js proxy (constitution principle II — a route
+    MUST NOT become browser-reachable as a side effect of an existing endpoint). Without a contract
+    file naming `/travel-events`, that test has no honest way to let the allowlist admit it. This
+    document is written to the same shape `003-travel-map`'s contract uses, describing exactly what
+    `backend/app/api/travel_events.py` and `backend/app/schemas.py` already implement — it is a
+    record of what was built, not a design document that preceded it.
+
+    Auth, error shape, and the `Trip` resource are unchanged from `003-travel-map`'s own contract,
+    referenced there rather than redefined here. This file only adds `TravelEvent` and the two
+    `destination`/`notes` columns `003`'s `Trip` gained.
+
+paths:
+  /travel-events:
+    get:
+      tags: [travel-events]
+      summary: List TravelEvents, optionally narrowed by trip, type, or date range
+      operationId: listTravelEvents
+      parameters:
+        - name: trip_id
+          in: query
+          required: false
+          schema: { type: integer }
+        - name: event_type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [transport, stay, activity, food, note]
+        - name: date_from
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: date_to
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Every matching TravelEvent
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/TravelEvent" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+    post:
+      tags: [travel-events]
+      summary: Create a TravelEvent
+      operationId: createTravelEvent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TravelEventCreate" }
+      responses:
+        "201":
+          description: The created TravelEvent
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TravelEvent" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "422":
+          description: Request failed validation, or `trip_id` names no Trip.
+
+  /travel-events/{event_id}:
+    parameters:
+      - name: event_id
+        in: path
+        required: true
+        schema: { type: integer }
+    get:
+      tags: [travel-events]
+      summary: Read one TravelEvent
+      operationId: getTravelEvent
+      responses:
+        "200":
+          description: The TravelEvent
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TravelEvent" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          description: No such travel event.
+    patch:
+      tags: [travel-events]
+      summary: Change one or more fields of a TravelEvent
+      operationId: updateTravelEvent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TravelEventUpdate" }
+      responses:
+        "200":
+          description: The updated TravelEvent
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TravelEvent" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          description: No such travel event.
+        "422":
+          description: Request failed validation, or `trip_id` names no Trip.
+    delete:
+      tags: [travel-events]
+      summary: Delete a TravelEvent
+      operationId: deleteTravelEvent
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          description: No such travel event.
+
+components:
+  responses:
+    Unauthenticated:
+      description: No valid token.
+
+  schemas:
+    TravelEvent:
+      type: object
+      required:
+        [id, trip_id, event_type, title, event_date, start_time, location, from_location,
+         to_location, booking_reference, category, notes, created_at, updated_at]
+      properties:
+        id: { type: integer }
+        trip_id: { type: [integer, "null"] }
+        event_type:
+          type: string
+          enum: [transport, stay, activity, food, note]
+        title: { type: string, maxLength: 200 }
+        event_date: { type: string, format: date }
+        start_time: { type: [string, "null"], format: time }
+        location: { type: [string, "null"], maxLength: 200 }
+        from_location: { type: [string, "null"], maxLength: 120 }
+        to_location: { type: [string, "null"], maxLength: 120 }
+        booking_reference: { type: [string, "null"], maxLength: 120 }
+        category: { type: [string, "null"], maxLength: 60 }
+        notes: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    TravelEventCreate:
+      type: object
+      required: [event_type, title, event_date]
+      properties:
+        trip_id: { type: [integer, "null"] }
+        event_type: { $ref: "#/components/schemas/TravelEvent/properties/event_type" }
+        title: { type: string, maxLength: 200 }
+        event_date: { type: string, format: date }
+        start_time: { type: [string, "null"], format: time }
+        location: { type: [string, "null"], maxLength: 200 }
+        from_location: { type: [string, "null"], maxLength: 120 }
+        to_location: { type: [string, "null"], maxLength: 120 }
+        booking_reference: { type: [string, "null"], maxLength: 120 }
+        category: { type: [string, "null"], maxLength: 60 }
+        notes: { type: [string, "null"] }
+
+    TravelEventUpdate:
+      type: object
+      minProperties: 1
+      properties:
+        trip_id: { type: [integer, "null"] }
+        event_type: { $ref: "#/components/schemas/TravelEvent/properties/event_type" }
+        title: { type: string, maxLength: 200 }
+        event_date: { type: string, format: date }
+        start_time: { type: [string, "null"], format: time }
+        location: { type: [string, "null"], maxLength: 200 }
+        from_location: { type: [string, "null"], maxLength: 120 }
+        to_location: { type: [string, "null"], maxLength: 120 }
+        booking_reference: { type: [string, "null"], maxLength: 120 }
+        category: { type: [string, "null"], maxLength: 60 }
+        notes: { type: [string, "null"] }

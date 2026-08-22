@@ -6,9 +6,15 @@ import { expect, test, type Page } from "@playwright/test";
  * **Structural, not decoration.** `.claude/rules/design.md` puts focus states in the short list of
  * things v0.1 may not defer — "Polish is deferred, structure is not ... That licenses skipping
  * decoration — not skipping responsive behaviour, focus states, or confirmation on destructive
- * actions. Those are structural and cost more to retrofit than to build." The keyboard journey in
- * `pipeline.spec.ts` (T058) already proves the product is *operable* without a pointer; this file
- * proves the creator can see where they are while doing it.
+ * actions. Those are structural and cost more to retrofit than to build."
+ *
+ * **Rewritten 2026-08-22** against `/map` and `/schedule` — Content Calendar (`/calendar`, the
+ * original stage for every scenario here) was removed entirely, the owner's instruction. The
+ * mapping: the calendar's month/week grid → the map surface and `/schedule`'s own month grid; the
+ * expanded backlog drawer → `TripPanel`; the capture sheet → `QuickAdd`'s status step; the item
+ * sheet → `DestinationSheet`; the delete confirmation → `DestinationSheet`'s own; the day-cell chip
+ * whose outline a tight container could clip → `DestinationStrip`'s card, the equivalent "small
+ * control in a narrow, scrolling container" shape.
  *
  * ## The elements are enumerated by the browser, not by hand
  *
@@ -28,17 +34,21 @@ import { expect, test, type Page } from "@playwright/test";
 
 const SESSION_COOKIE = "ch_session";
 
-function item(id: number, overrides: Record<string, unknown> = {}) {
+function aDestination(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    id,
-    title: `Item ${id}`,
-    hook: null,
-    platform: null,
-    scheduled_date: null,
-    status: "idea",
-    published_url: null,
+    id: 1,
+    trip_id: null,
+    name: "Porto",
+    latitude: 41.1579,
+    longitude: -8.6291,
+    start_date: null,
+    end_date: null,
+    status: "wishlist",
+    note: null,
+    photographs: [],
     created_at: "2026-08-01T09:00:00Z",
     updated_at: "2026-08-01T09:00:00Z",
+    outside_trip_range: false,
     ...overrides,
   };
 }
@@ -47,18 +57,52 @@ async function signedIn(page: Page, baseURL: string | undefined): Promise<void> 
   await page.context().addCookies([{ name: SESSION_COOKIE, value: "stub-session", url: baseURL! }]);
 }
 
-async function openCalendar(page: Page, baseURL: string | undefined, items: unknown[]) {
-  await page.route("**/api/content-items*", async (route) => {
+async function openMap(
+  page: Page,
+  baseURL: string | undefined,
+  destinations: Record<string, unknown>[],
+): Promise<void> {
+  await page.route("**/api/destinations", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(destinations) });
+  });
+  for (const detail of destinations) {
+    await page.route(new RegExp(`/api/destinations/${detail["id"]}$`), async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(detail) });
+    });
+  }
+  await page.route("**/api/trips*", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await page.route("**/api/locations/search*", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(items),
+      body: JSON.stringify([{ name: "Kyoto", address: "Kyoto, Japan", latitude: 35.0116, longitude: 135.7681 }]),
     });
   });
   await signedIn(page, baseURL);
   await page.clock.setFixedTime(Date.UTC(2026, 7, 3, 3, 0, 0));
-  await page.goto("/calendar");
-  await page.getByTestId("capture-action").waitFor();
+  await page.goto("/map");
+  await page.getByTestId("map-eyebrow").waitFor();
+}
+
+async function openSchedule(page: Page, baseURL: string | undefined): Promise<void> {
+  await page.route("**/api/travel-events*", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await page.route("**/api/trips*", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await page.route("**/api/destinations*", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await signedIn(page, baseURL);
+  await page.clock.setFixedTime(Date.UTC(2026, 7, 3, 3, 0, 0));
+  await page.goto("/schedule");
+  await page.getByTestId("schedule-shell").waitFor();
 }
 
 /**
@@ -102,11 +146,10 @@ async function focusReport(page: Page): Promise<{
      * walking with Tab in the first place.
      *
      * The exemption this exists for is real and was found by a flaky run: **Chromium makes a
-     * scrolling container keyboard-focusable** so it can be scrolled with the arrow keys, and
-     * `CalendarShell`'s `<main>` is `overflow-y-auto`. It is therefore a genuine tab stop while being
-     * nobody's idea of an interactive element, and giving the whole calendar body a 2px brand
-     * outline would be wrong. It keeps the browser's own faint ring, which is the right answer for a
-     * scroll region.
+     * scrolling container keyboard-focusable** so it can be scrolled with the arrow keys, and any
+     * `overflow-y-auto` main region is one. It is therefore a genuine tab stop while being nobody's
+     * idea of an interactive element, and giving the whole page body a 2px brand outline would be
+     * wrong. It keeps the browser's own faint ring, which is the right answer for a scroll region.
      */
     const INTERACTIVE_TAGS = ["BUTTON", "A", "INPUT", "SELECT", "TEXTAREA"];
     const INTERACTIVE_ROLES = [
@@ -162,21 +205,22 @@ async function tabForUnstyled(page: Page, steps: number): Promise<string[]> {
   return unstyled;
 }
 
-test("every control on the calendar shows focus when tabbed to", async ({ page, baseURL }) => {
-  await openCalendar(page, baseURL, [
-    item(1, { scheduled_date: "2026-08-12", status: "draft", platform: "tiktok" }),
-    item(2),
-  ]);
+test("every control on the map shows focus when tabbed to", async ({ page, baseURL }) => {
+  await openMap(page, baseURL, [aDestination({ id: 1 }), aDestination({ id: 2, name: "Kyoto" })]);
 
-  // Long enough to reach the whole surface: the nav drawer trigger, the four filter options, the
-  // backlog toggle, its capture button, the chips, the view toggle, both arrows and `+ CAPTURE`.
-  // Sign-out moved behind the nav drawer at 002 T030, so it is no longer on this walk — see the nav
-  // drawer's own test below.
+  // Long enough to reach the whole surface: the nav drawer trigger, the status filter options, the
+  // destination strip's cards, and QuickAdd's own search input and submit.
+  expect(await tabForUnstyled(page, 30)).toEqual([]);
+});
+
+test("every control on the schedule shows focus when tabbed to", async ({ page, baseURL }) => {
+  await openSchedule(page, baseURL);
+
   expect(await tabForUnstyled(page, 30)).toEqual([]);
 });
 
 test("every control in the nav drawer shows focus when tabbed to", async ({ page, baseURL }) => {
-  await openCalendar(page, baseURL, [item(1), item(2)]);
+  await openMap(page, baseURL, [aDestination()]);
   await page.getByTestId("nav-drawer-trigger").click();
   await page.getByTestId("nav-drawer-panel").waitFor();
 
@@ -185,55 +229,50 @@ test("every control in the nav drawer shows focus when tabbed to", async ({ page
   expect(await tabForUnstyled(page, 30)).toEqual([]);
 });
 
-test("every control in the week view shows focus when tabbed to", async ({ page, baseURL }) => {
-  await openCalendar(page, baseURL, [
-    item(1, { scheduled_date: "2026-08-05", status: "posted", published_url: "https://tiktok.com/x" }),
-  ]);
-  await page.getByTestId("view-week").click();
+test("every control in the Trip panel shows focus when tabbed to", async ({ page, baseURL }) => {
+  await openMap(page, baseURL, [aDestination()]);
+  await page.getByTestId("open-trips").click();
+  await page.getByTestId("trip-panel").waitFor();
 
-  // The week list draws `full` chips, which carry the published-link control beside them (T065) —
-  // an `<a>`, and the one focusable element here that is not a `<button>`.
   expect(await tabForUnstyled(page, 30)).toEqual([]);
 });
 
-test("every control in the expanded backlog drawer shows focus when tabbed to", async ({
+test("every control in QuickAdd's status step shows focus when tabbed to", async ({
   page,
   baseURL,
 }) => {
-  await openCalendar(page, baseURL, [item(1), item(2)]);
-  await page.getByTestId("backlog-toggle").click();
-
-  expect(await tabForUnstyled(page, 30)).toEqual([]);
-});
-
-test("every control in the capture sheet shows focus when tabbed to", async ({ page, baseURL }) => {
-  await openCalendar(page, baseURL, []);
-  await page.getByTestId("capture-action").click();
-  await page.getByPlaceholder("Rooftop b-roll cutdown").waitFor();
+  await openMap(page, baseURL, []);
+  await page.getByTestId("quick-add-search-input").fill("Kyoto");
+  await page.getByTestId("quick-add-search-input").press("Enter");
+  await page.getByTestId("quick-add-search-add").first().click();
+  await page.getByTestId("quick-add-status-step").waitFor();
 
   expect(await tabForUnstyled(page, 12)).toEqual([]);
 });
 
-test("every control in the item sheet shows focus when tabbed to", async ({ page, baseURL }) => {
-  await openCalendar(page, baseURL, [
-    item(1, { scheduled_date: "2026-08-12", status: "posted", published_url: "https://tiktok.com/x" }),
-  ]);
-  await page.getByTestId("item-chip").first().click();
-  await page.getByTestId("item-save").waitFor();
-
-  // The densest surface in the product: two text fields, three status options, three platform
-  // options, a date input, its CLEAR, the link field, the link's open control, save and close.
-  expect(await tabForUnstyled(page, 40)).toEqual([]);
-});
-
-test("every control in the delete confirmation shows focus when tabbed to", async ({
+test("every control in the Destination sheet shows focus when tabbed to", async ({
   page,
   baseURL,
 }) => {
-  await openCalendar(page, baseURL, [item(1)]);
-  await page.getByTestId("item-chip").first().click();
-  await page.getByTestId("item-delete").click();
-  await page.getByTestId("delete-confirm").waitFor();
+  await openMap(page, baseURL, [aDestination({ status: "visited", note: "Loved it." })]);
+  await page.getByTestId("destination-pin").click();
+  await page.getByTestId("place-confirm-open").click();
+  await page.getByTestId("destination-save").waitFor();
+
+  // A dense surface: name, status options, a note field (visited), save, delete, close.
+  expect(await tabForUnstyled(page, 40)).toEqual([]);
+});
+
+test("every control in the Destination delete confirmation shows focus when tabbed to", async ({
+  page,
+  baseURL,
+}) => {
+  await openMap(page, baseURL, [aDestination()]);
+  await page.getByTestId("destination-pin").click();
+  await page.getByTestId("place-confirm-open").click();
+  await page.getByTestId("destination-delete").waitFor();
+  await page.getByTestId("destination-delete").click();
+  await page.getByTestId("destination-delete-confirm").waitFor();
 
   expect(await tabForUnstyled(page, 12)).toEqual([]);
 });
@@ -286,59 +325,51 @@ async function paintsAFocusRing(page: Page, testId: string): Promise<boolean> {
 }
 
 test("the focus ring is painted, not merely declared", async ({ page, baseURL }) => {
-  await openCalendar(page, baseURL, [
-    item(1, { scheduled_date: "2026-08-12", status: "draft", platform: "tiktok" }),
-  ]);
+  await openMap(page, baseURL, [aDestination()]);
 
   for (const testId of [
-    "nav-drawer-trigger", // plain, on a dark surface — sign-out's old spot in this list, T030
-    "platform-filter-all", // brand-filled: the red-on-red case the offset solves
-    "view-month", // inside an `overflow-hidden` group
-    "capture-action", // `.notch-card`, whose clip-path eats an outset ring entirely
-    "backlog-toggle",
-    "period-next",
+    "nav-drawer-trigger", // plain, on a dark surface
+    "status-filter-all", // brand-filled: the red-on-red case the offset solves
+    "open-trips",
+    "quick-add-search-input",
   ]) {
     expect(await paintsAFocusRing(page, testId), `${testId} draws no focus ring`).toBe(true);
   }
 });
 
 test("the focus ring is painted on the nav drawer's own controls", async ({ page, baseURL }) => {
-  await openCalendar(page, baseURL, [
-    item(1, { scheduled_date: "2026-08-12", status: "draft", platform: "tiktok" }),
-  ]);
+  await openMap(page, baseURL, [aDestination()]);
   await page.getByTestId("nav-drawer-trigger").click();
   await page.getByTestId("nav-drawer-panel").waitFor();
 
-  // Moved out of the header at 002 T030 — checked here rather than in the sweep above because both
-  // controls exist only once the drawer is open, and opening it would put the scrim over every
-  // control that sweep already checks, breaking those screenshots' clip regions.
+  // Checked here rather than in the sweep above because both controls exist only once the drawer is
+  // open, and opening it would put the scrim over every control that sweep already checks, breaking
+  // those screenshots' clip regions.
   for (const testId of ["nav-drawer-close", "sign-out-action"]) {
     expect(await paintsAFocusRing(page, testId), `${testId} draws no focus ring`).toBe(true);
   }
 });
 
-test("the focus indicator is not clipped away by a day cell", async ({ page, baseURL }) => {
-  await openCalendar(page, baseURL, [
-    item(1, { scheduled_date: "2026-08-12", status: "draft", platform: "tiktok" }),
-  ]);
+test("the focus indicator is not clipped away by a strip card", async ({ page, baseURL }) => {
+  await openMap(page, baseURL, [aDestination()]);
 
-  // The tightest container in the product: a `micro` chip inside a ~53px day cell, inside a grid
-  // that scrolls in its own container, inside `html, body { overflow-x: hidden }`. An indicator
-  // drawn *outside* the element's box is exactly what an ancestor's overflow clips, and a focus ring
-  // nobody can see fails FR-021's sibling requirement in `.claude/rules/design.md` while satisfying
-  // every assertion about which class is applied.
-  const chip = page.getByTestId("item-chip").first();
-  await chip.focus();
+  // The tightest container on this surface: a card inside `DestinationStrip`'s own horizontally
+  // scrolling row, itself inset over the map. An indicator drawn *outside* the element's box is
+  // exactly what an ancestor's overflow clips, and a focus ring nobody can see fails FR-021's
+  // sibling requirement in `.claude/rules/design.md` while satisfying every assertion about which
+  // class is applied.
+  const card = page.getByTestId(/^destination-card-/).first();
+  await card.focus();
 
-  const box = (await chip.boundingBox())!;
+  const box = (await card.boundingBox())!;
   const viewport = page.viewportSize()!;
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
 
-  // The indicator is drawn within 4px of the chip's own box, so a cell that clips at its border
-  // still shows it. Asserted as a number rather than by eye because the alternative is a screenshot
-  // nobody re-takes.
-  const offset = await chip.evaluate((el) => {
+  // The indicator is drawn within 4px of the card's own box, so a container that clips at its
+  // border still shows it. Asserted as a number rather than by eye because the alternative is a
+  // screenshot nobody re-takes.
+  const offset = await card.evaluate((el) => {
     const style = getComputedStyle(el);
     return {
       width: parseFloat(style.outlineWidth) || 0,

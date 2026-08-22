@@ -87,7 +87,8 @@ def main() -> None:
             return
 
         # There is exactly one account. Silently adding a second would half-work — both could log
-        # in, and because `content_item` has no owner column (INV-4) they would share every item.
+        # in, and because no table in this schema has an owner column (INV-4, constitution VII)
+        # they would share every row.
         total = session.exec(select(func.count()).select_from(Creator)).one()
         if total:
             other = session.exec(select(Creator.email)).first()

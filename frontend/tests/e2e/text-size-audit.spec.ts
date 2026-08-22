@@ -30,51 +30,97 @@ const MARCH_2026 = Date.UTC(2026, 2, 12, 3, 0, 0);
 
 test.use({ timezoneId: "Asia/Ho_Chi_Minh" });
 
-function item(id: number, overrides: Record<string, unknown> = {}) {
+async function signedIn(page: Page, baseURL: string | undefined): Promise<void> {
+  await page.context().addCookies([{ name: SESSION_COOKIE, value: "stub-session", url: baseURL! }]);
+}
+
+/** `/map` and `/schedule` fixtures — Content Calendar (`/calendar`) was removed 2026-08-22, the
+ * owner's instruction, and these are its replacements as the product's busy surfaces. */
+function destination(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 1,
+    trip_id: null,
+    name: "Porto",
+    latitude: 41.1579,
+    longitude: -8.6291,
+    start_date: null,
+    end_date: null,
+    status: "wishlist",
+    note: null,
+    photographs: [],
+    created_at: "2026-03-01T09:00:00Z",
+    updated_at: "2026-03-01T09:00:00Z",
+    outside_trip_range: false,
+    ...overrides,
+  };
+}
+
+async function openMap(page: Page, baseURL: string | undefined, destinations: unknown[]): Promise<void> {
+  await signedIn(page, baseURL);
+  await page.route("**/api/destinations", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(destinations) });
+  });
+  await page.route("**/api/trips*", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+
+  await page.clock.setFixedTime(MARCH_2026);
+  await page.goto("/map");
+  await expect(page.getByTestId("map-eyebrow")).toBeVisible();
+}
+
+function travelEvent(id: number, overrides: Record<string, unknown> = {}) {
   return {
     id,
-    title: `Item ${id}`,
-    hook: null,
-    platform: null,
-    scheduled_date: null,
-    status: "idea",
-    published_url: null,
+    trip_id: 1,
+    event_type: "activity",
+    title: `Event ${id}`,
+    event_date: "2026-03-11",
+    start_time: null,
+    location: null,
+    from_location: null,
+    to_location: null,
+    booking_reference: null,
+    category: null,
+    notes: null,
     created_at: "2026-03-01T09:00:00Z",
     updated_at: "2026-03-01T09:00:00Z",
     ...overrides,
   };
 }
 
-const BUSY = [
-  item(1, { scheduled_date: "2026-03-11", platform: "tiktok", status: "draft" }),
-  item(2, {
-    scheduled_date: "2026-03-11",
-    platform: "youtube",
-    status: "posted",
-    published_url: "https://www.youtube.com/watch?v=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  }),
-  item(3, { scheduled_date: "2026-03-11", platform: "instagram" }),
-  item(4, { scheduled_date: "2026-02-02" }),
-  item(5), // undated — the one row the backlog drawer has something to show
-];
+const SCHEDULE_TRIP = {
+  id: 1,
+  name: "Japan Summer 2026",
+  destination: "Tokyo, Japan",
+  start_date: "2026-03-11",
+  end_date: "2026-03-20",
+  status: "planned",
+  notes: null,
+  created_at: "2026-03-01T09:00:00Z",
+  updated_at: "2026-03-01T09:00:00Z",
+};
 
-async function signedIn(page: Page, baseURL: string | undefined): Promise<void> {
-  await page.context().addCookies([{ name: SESSION_COOKIE, value: "stub-session", url: baseURL! }]);
-}
-
-async function openCalendar(
+async function openSchedule(
   page: Page,
   baseURL: string | undefined,
-  items: unknown[] = BUSY,
+  { trips = [SCHEDULE_TRIP], events = [travelEvent(1)] }: { trips?: unknown[]; events?: unknown[] } = {},
 ): Promise<void> {
   await signedIn(page, baseURL);
-  await page.route("**/api/content-items*", async (route) => {
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(items) });
+  await page.route("**/api/trips*", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(trips) });
+  });
+  await page.route("**/api/travel-events*", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(events) });
+  });
+  await page.route("**/api/destinations*", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
   });
 
   await page.clock.setFixedTime(MARCH_2026);
-  await page.goto("/calendar");
-  await expect(page.getByTestId("capture-action")).toBeVisible();
+  await page.goto("/schedule");
+  await expect(page.getByTestId("schedule-shell")).toBeVisible();
 }
 
 /**
@@ -87,18 +133,18 @@ async function openCalendar(
 async function textSizeViolations(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     /*
-     * FR-032's closed set: an item's title, its hook, and any value shown inside a cell or row —
-     * **not** everything a chip happens to render alongside them. `item-title` is the title text
-     * itself, present on every chip size; `item-title-input`/`item-hook-input` are the item sheet's
-     * editable form of the same two values.
-     *
-     * `item-chip` was tried first and was too broad: it also wraps `PlatformCue`'s single-letter
-     * monogram and `StatusCue`'s checkmark, which T019 correctly kept at the 12px floor (FR-033) —
-     * they are chrome standing in for a value, not the value itself, the same distinction FR-032
-     * draws between a status *cue* and a status. The wider selector flagged both as false content-
-     * floor violations the moment T019 landed a correctly-sized chip.
+     * FR-032's closed set: a place's name, a Trip's name/destination, a travel event's title — the
+     * content a creator typed, not the chrome around it. `destination-name-input`, `trip-form-name`/
+     * `trip-form-destination` and `event-form-title` are the editable forms of those values, the
+     * same role `item-title-input`/`item-hook-input` played for Content Calendar before it was
+     * removed 2026-08-22.
      */
-    const CONTENT_ANCESTOR_TESTIDS = ["item-title", "item-title-input", "item-hook-input"];
+    const CONTENT_ANCESTOR_TESTIDS = [
+      "destination-name-input",
+      "trip-form-name",
+      "trip-form-destination",
+      "event-form-title",
+    ];
 
     function isContentText(el: Element): boolean {
       return CONTENT_ANCESTOR_TESTIDS.some(
@@ -197,70 +243,92 @@ for (const theme of ["dark", "light"] as const) {
 
     test.describe("the routes", () => {
       test("/login", async ({ page }) => {
-    await page.goto("/login");
-    await expect(page.getByRole("button", { name: /sign in/i })).toBeVisible();
-    await auditSurface(page, "/login");
-  });
+        await page.goto("/login");
+        await expect(page.getByRole("button", { name: /sign in/i })).toBeVisible();
+        await auditSurface(page, "/login");
+      });
 
-  test("/calendar, month view, busy", async ({ page, baseURL }) => {
-    await openCalendar(page, baseURL);
-    await expect(page.getByTestId("month-grid")).toBeVisible();
-    await auditSurface(page, "/calendar month");
-  });
+      test("/map, populated", async ({ page, baseURL }) => {
+        await openMap(page, baseURL, [
+          destination({ id: 1, name: "Porto", status: "visited", note: "Loved every minute." }),
+          destination({ id: 2, name: "Kyoto", status: "planned" }),
+        ]);
+        await expect(page.getByTestId("destination-strip-list")).toBeVisible();
+        await auditSurface(page, "/map populated");
+      });
 
-  test("/calendar, week view, busy", async ({ page, baseURL }) => {
-    await openCalendar(page, baseURL);
-    await page.getByTestId("view-week").click();
-    await expect(page.getByTestId("week-list")).toBeVisible();
-    await auditSurface(page, "/calendar week");
-  });
+      test("/schedule, month view, busy", async ({ page, baseURL }) => {
+        await openSchedule(page, baseURL, {
+          events: [travelEvent(1, { event_type: "transport" }), travelEvent(2, { event_type: "stay" })],
+        });
+        await expect(page.getByTestId("schedule-month-grid")).toBeVisible();
+        await auditSurface(page, "/schedule month");
+      });
 
-  test("/calendar, the filtered empty state", async ({ page, baseURL }) => {
-    await openCalendar(page, baseURL, [item(1, { platform: "tiktok" })]);
-    await page.getByTestId("platform-filter-youtube").click();
-    await expect(page.getByTestId("filtered-empty")).toBeVisible();
-    await auditSurface(page, "/calendar filtered empty");
-  });
+      test("/schedule, the filtered-to-nothing state", async ({ page, baseURL }) => {
+        await openSchedule(page, baseURL);
+        await page.getByTestId("schedule-filter-note").click();
+        await expect(page.getByTestId("upcoming-empty")).toBeVisible();
+        await auditSurface(page, "/schedule filtered to nothing");
+      });
 
-  test("/calendar, the first-run state", async ({ page, baseURL }) => {
-    await openCalendar(page, baseURL, []);
-    await expect(page.getByTestId("first-run")).toBeVisible();
-    await auditSurface(page, "/calendar first run");
-  });
-});
+      test("/schedule, the empty state (no Trips, no events)", async ({ page, baseURL }) => {
+        await openSchedule(page, baseURL, { trips: [], events: [] });
+        await expect(page.getByTestId("trip-timeline-empty")).toBeVisible();
+        await auditSurface(page, "/schedule empty");
+      });
+    });
 
-test.describe("the overlay surfaces", () => {
-  test("the capture sheet", async ({ page, baseURL }) => {
-    await openCalendar(page, baseURL);
-    await page.getByTestId("capture-action").click();
-    await expect(page.getByPlaceholder("Rooftop b-roll cutdown")).toBeInViewport();
-    await auditSurface(page, "capture sheet");
-  });
+    test.describe("the overlay surfaces", () => {
+      test("the Destination sheet, every field filled", async ({ page, baseURL }) => {
+        const porto = destination({ status: "visited", note: "Loved every minute of it." });
+        await openMap(page, baseURL, [porto]);
+        await page.route(new RegExp(`/api/destinations/${porto["id"] as number}$`), async (route) => {
+          if (route.request().method() !== "GET") return route.fallback();
+          await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(porto) });
+        });
+        await page.getByTestId("destination-pin").click();
+        await page.getByTestId("place-confirm-open").click();
+        await expect(page.getByTestId("destination-save")).toBeInViewport();
+        await auditSurface(page, "Destination sheet");
+      });
 
-  test("the backlog drawer, expanded", async ({ page, baseURL }) => {
-    await openCalendar(page, baseURL);
-    await page.getByTestId("backlog-toggle").click();
-    await expect(page.getByTestId("backlog-expanded")).toBeVisible();
-    await auditSurface(page, "backlog drawer expanded");
-  });
+      test("the Trip panel, open", async ({ page, baseURL }) => {
+        await openMap(page, baseURL, []);
+        await page.getByTestId("open-trips").click();
+        await expect(page.getByTestId("trip-panel")).toBeVisible();
+        await auditSurface(page, "Trip panel");
+      });
 
-  test("the item sheet, every field filled", async ({ page, baseURL }) => {
-    await openCalendar(page, baseURL);
-    await page.getByTestId("backlog-toggle").click();
-    await page.getByTestId("backlog-list").getByTestId("item-chip").first().click();
-    await expect(page.getByTestId("item-save")).toBeInViewport();
-    await auditSurface(page, "item sheet");
-  });
+      test("the new-entry picker", async ({ page, baseURL }) => {
+        await openSchedule(page, baseURL, { trips: [], events: [] });
+        await page.getByTestId("schedule-cta").click();
+        await expect(page.getByTestId("new-entry-trip")).toBeInViewport();
+        await auditSurface(page, "new-entry picker");
+      });
 
-  test("the delete confirmation", async ({ page, baseURL }) => {
-    await openCalendar(page, baseURL);
-    await page.getByTestId("backlog-toggle").click();
-    await page.getByTestId("backlog-list").getByTestId("item-chip").first().click();
-    await expect(page.getByTestId("item-save")).toBeInViewport();
-    await page.getByTestId("item-delete").click();
-    await expect(page.getByTestId("delete-confirm")).toBeVisible();
-    await auditSurface(page, "delete confirmation");
-  });
-});
+      test("the Trip form, every field filled", async ({ page, baseURL }) => {
+        await openSchedule(page, baseURL, { trips: [], events: [] });
+        await page.getByTestId("schedule-cta").click();
+        await page.getByTestId("new-entry-trip").click();
+        await expect(page.getByTestId("trip-form-name")).toBeInViewport();
+        await auditSurface(page, "Trip form");
+      });
+
+      test("the event form, every field filled", async ({ page, baseURL }) => {
+        await openSchedule(page, baseURL, { trips: [], events: [] });
+        await page.getByTestId("schedule-cta").click();
+        await page.getByTestId("new-entry-transport").click();
+        await expect(page.getByTestId("event-form-title")).toBeInViewport();
+        await auditSurface(page, "event form");
+      });
+
+      test("Day Detail, with an event", async ({ page, baseURL }) => {
+        await openSchedule(page, baseURL);
+        await page.locator('[data-testid="schedule-day-cell"][data-date="2026-03-11"]').click();
+        await expect(page.getByTestId("day-detail-list")).toBeInViewport();
+        await auditSurface(page, "Day Detail");
+      });
+    });
   });
 }

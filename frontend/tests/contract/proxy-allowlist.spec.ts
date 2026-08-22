@@ -33,10 +33,13 @@ const CONTRACT_PATHS = [
   resolve(__dirname, "../../../specs/001-content-calendar/contracts/openapi.yaml"),
   resolve(__dirname, "../../../specs/002-pixel-arcade-skin/contracts/openapi.yaml"),
   resolve(__dirname, "../../../specs/003-travel-map/contracts/openapi.yaml"),
+  // Module 02 (Travel Schedule) — not a numbered iteration (built outside the speckit workflow),
+  // but the allowlist still needs a contract file to point at; see that file's own header comment.
+  resolve(__dirname, "../../../specs/travel-schedule/contracts/openapi.yaml"),
 ];
 
 // OpenAPI 3.1 fixed fields of a Path Item that are operations. Everything else under a path —
-// `parameters`, `summary`, `$ref` — is not, and /content-items/{item_id} has a `parameters` key.
+// `parameters`, `summary`, `$ref` — is not, and /trips/{trip_id} has a `parameters` key.
 const OPERATION_KEYS = new Set(["get", "put", "post", "delete", "options", "head", "patch", "trace"]);
 
 function pathsIn(contractPath: string): Record<string, Record<string, unknown>> {
@@ -132,11 +135,6 @@ test.describe("isAllowed", () => {
   test("admits exactly the allowlisted pairs", () => {
     expect(isAllowed("POST", ["auth", "login"])).toBe(true);
     expect(isAllowed("POST", ["auth", "logout"])).toBe(true);
-    expect(isAllowed("GET", ["content-items"])).toBe(true);
-    expect(isAllowed("POST", ["content-items"])).toBe(true);
-    expect(isAllowed("GET", ["content-items", "42"])).toBe(true);
-    expect(isAllowed("PATCH", ["content-items", "42"])).toBe(true);
-    expect(isAllowed("DELETE", ["content-items", "42"])).toBe(true);
     expect(isAllowed("GET", ["preferences"])).toBe(true);
     expect(isAllowed("PATCH", ["preferences"])).toBe(true);
     expect(isAllowed("GET", ["trips"])).toBe(true);
@@ -153,13 +151,17 @@ test.describe("isAllowed", () => {
     expect(isAllowed("POST", ["destinations", "9", "photos"])).toBe(true);
     expect(isAllowed("POST", ["destinations", "9", "photos", "upload-url"])).toBe(true);
     expect(isAllowed("DELETE", ["destinations", "9", "photos", "3"])).toBe(true);
+    expect(isAllowed("GET", ["travel-events"])).toBe(true);
+    expect(isAllowed("POST", ["travel-events"])).toBe(true);
+    expect(isAllowed("GET", ["travel-events", "5"])).toBe(true);
+    expect(isAllowed("PATCH", ["travel-events", "5"])).toBe(true);
+    expect(isAllowed("DELETE", ["travel-events", "5"])).toBe(true);
   });
 
   test("rejects a method the contract does not give that path", () => {
     expect(isAllowed("GET", ["auth", "login"])).toBe(false);
-    expect(isAllowed("DELETE", ["content-items"])).toBe(false);
-    expect(isAllowed("PATCH", ["content-items"])).toBe(false);
-    expect(isAllowed("POST", ["content-items", "42"])).toBe(false);
+    expect(isAllowed("PATCH", ["trips"])).toBe(false);
+    expect(isAllowed("POST", ["trips", "42"])).toBe(false);
     expect(isAllowed("POST", ["preferences"])).toBe(false);
     expect(isAllowed("DELETE", ["preferences"])).toBe(false);
     expect(isAllowed("DELETE", ["trips"])).toBe(false);
@@ -174,36 +176,35 @@ test.describe("isAllowed", () => {
 
   test("rejects paths the contract does not declare", () => {
     expect(isAllowed("GET", [])).toBe(false);
-    expect(isAllowed("GET", ["content-items", "42", "comments"])).toBe(false);
+    expect(isAllowed("GET", ["trips", "42", "comments"])).toBe(false);
     expect(isAllowed("GET", ["growth"])).toBe(false);
     expect(isAllowed("POST", ["auth"])).toBe(false);
     expect(isAllowed("POST", ["auth", "register"])).toBe(false);
   });
 
   test("rejects a path parameter that is not an integer", () => {
-    // The contract types item_id as an integer. Anything else is either a client bug or someone
-    // probing — and it is what stops a decoded `..` or an empty segment reaching FastAPI as a path.
-    expect(isAllowed("GET", ["content-items", ".."])).toBe(false);
-    expect(isAllowed("GET", ["content-items", ""])).toBe(false);
-    expect(isAllowed("GET", ["content-items", "42abc"])).toBe(false);
-    expect(isAllowed("GET", ["content-items", "4 2"])).toBe(false);
-    expect(isAllowed("GET", ["content-items", "42/43"])).toBe(false);
-    // trip_id, destination_id, photo_id — same integer-only rule, added at 003-travel-map T011.
+    // The contract types trip_id (and destination_id, photo_id, event_id) as an integer. Anything
+    // else is either a client bug or someone probing — and it is what stops a decoded `..` or an
+    // empty segment reaching FastAPI as a path.
     expect(isAllowed("GET", ["trips", ".."])).toBe(false);
+    expect(isAllowed("GET", ["trips", ""])).toBe(false);
+    expect(isAllowed("GET", ["trips", "42abc"])).toBe(false);
+    expect(isAllowed("GET", ["trips", "4 2"])).toBe(false);
+    expect(isAllowed("GET", ["trips", "42/43"])).toBe(false);
     expect(isAllowed("PATCH", ["destinations", "9abc"])).toBe(false);
     expect(isAllowed("DELETE", ["destinations", "9", "photos", ""])).toBe(false);
   });
 
   test("rejects a method that is not one of the four the proxy speaks", () => {
     expect(isAllowed("post", ["auth", "login"])).toBe(false);
-    expect(isAllowed("PUT", ["content-items", "42"])).toBe(false);
-    expect(isAllowed("OPTIONS", ["content-items"])).toBe(false);
-    expect(isAllowed("HEAD", ["content-items"])).toBe(false);
+    expect(isAllowed("PUT", ["trips", "42"])).toBe(false);
+    expect(isAllowed("OPTIONS", ["trips"])).toBe(false);
+    expect(isAllowed("HEAD", ["trips"])).toBe(false);
   });
 
   test("matchedRoute names the contract template it matched", () => {
-    expect(matchedRoute("PATCH", ["content-items", "7"])).toBe("/content-items/{item_id}");
-    expect(matchedRoute("GET", ["content-items"])).toBe("/content-items");
+    expect(matchedRoute("PATCH", ["trips", "7"])).toBe("/trips/{trip_id}");
+    expect(matchedRoute("GET", ["trips"])).toBe("/trips");
     expect(matchedRoute("GET", ["health"])).toBeNull();
   });
 });

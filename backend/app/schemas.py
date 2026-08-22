@@ -1,8 +1,7 @@
 """Response models shared across routers.
 
 Only what more than one module needs. Request and response models specific to a single resource stay
-with that resource's router — `LoginRequest` and `TokenResponse` belong in `app/api/auth.py`, and
-the content-item models live in `app/api/content_items.py`.
+with that resource's router — `LoginRequest` and `TokenResponse` belong in `app/api/auth.py`.
 
 This module exists because `ErrorResponse` acquired a second caller: `app/main.py` declares it as
 the global 422 model, and every router declares it on its own 4xx responses. Defining it in
@@ -14,19 +13,18 @@ is their second (T012 — the amended login response optionally carries a `Prefe
 Putting them in `preferences.py` would make `auth.py` import a sibling router module for a response
 model, the same shape of mistake `ErrorResponse` living in `main.py` would have been.
 
-**003-travel-map's Trip/Destination/Photograph/LocationCandidate models live here too, and that is a
-departure from `content_items.py`'s precedent** — `tasks.md`'s T005 places them in this shared
-module rather than with their own routers because `Photograph` and `DestinationDetail` are each read
-by more than one router file (`destinations.py` and `photographs.py`), the same multi-caller reason
-`ErrorResponse` and the Preferences pair are here.
+**003-travel-map's Trip/Destination/Photograph/LocationCandidate models live here too** —
+`tasks.md`'s T005 places them in this shared module rather than with their own routers because
+`Photograph` and `DestinationDetail` are each read by more than one router file (`destinations.py`
+and `photographs.py`), the same multi-caller reason `ErrorResponse` and the Preferences pair are
+here.
 """
 
-from datetime import date, datetime
-from typing import Literal
+from datetime import date, datetime, time
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.models import DestinationStatus, Theme, TripStatus
+from app.models import DestinationStatus, Theme, TravelEventType, TripStatus
 
 
 class ErrorResponse(BaseModel):
@@ -48,55 +46,6 @@ class ErrorResponse(BaseModel):
     detail: str
 
 
-InvariantCode = Literal["platform_required", "platform_locked"]
-"""The contract's `InvariantError.code` enum, in full.
-
-Two members, and the closed set is the point. `platform_required` means "pick a platform";
-`platform_locked` means "move it back to `idea` first". They are different instructions to the
-creator, and a third value appearing here without a contract amendment would be a rule nothing on
-the frontend knows how to explain.
-
-`platform_locked` is unreachable until `PATCH` exists at T049 — nothing can *clear* a platform yet.
-It is declared now regardless, because the enum is what the frontend switches on and a client
-generated against a one-member enum would need regenerating rather than extending.
-"""
-
-
-class InvariantErrorResponse(BaseModel):
-    """The contract's `InvariantError`. The **only** error in this API that is not just `detail`.
-
-    Every other 4xx is `ErrorResponse`, and `test_errors.py` enforces that. This one is the single
-    documented exception, and it exists because `code` is doing work no string can do: it is what
-    separates the two INV-1 failures from each other, and the frontend renders a different
-    instruction for each. Pattern-matching on `detail` instead would make the human-readable message
-    load-bearing — so it could not be reworded, translated, or improved.
-
-    The seam this closes is written up in `backend/AGENTS.md`: `contracts/openapi.yaml` declared
-    this shape from the start while `tests/test_errors.py` asserted exactly one key everywhere, and
-    both were green only because no endpoint could return a 409. T030 built the first one. The
-    contract won, per CLAUDE.md's first non-negotiable.
-    """
-
-    code: InvariantCode
-    detail: str
-
-
-class InvariantViolationError(Exception):
-    """Raised at the API boundary when a request would break INV-1.
-
-    An exception plus a handler in `app/main.py`, rather than an `HTTPException`, because
-    `HTTPException(detail=...)` can only produce `{"detail": ...}` — a dict passed to it nests as
-    `{"detail": {"code": ..., "detail": ...}}`, which is neither shape the contract declares.
-
-    Raised *before* the write, never caught after it. Letting the `CHECK` constraint fire and
-    translating the `IntegrityError` would work, but it would mean the database's error message is
-    the thing the creator's experience depends on, and a 500 is one forgotten `except` away.
-    """
-
-    def __init__(self, code: InvariantCode, detail: str) -> None:
-        super().__init__(detail)
-        self.code = code
-        self.detail = detail
 
 
 class PreferencesRead(BaseModel):
@@ -114,7 +63,7 @@ class PreferencesRead(BaseModel):
 class PreferencesUpdate(BaseModel):
     """The contract's `PreferencesUpdate`: at least one key, and no unknown ones.
 
-    Unlike `ContentItemUpdate`, neither field is nullable — an explicit `null` is a validation
+    Neither field is nullable — an explicit `null` is a validation
     failure rather than a third meaning, because neither column can be cleared (data-model.md: "no
     third state that no requirement reads"). `extra="forbid"` is the contract's
     `additionalProperties: false`: without it, a client that misspells `sound_enabled` would get a
@@ -140,15 +89,14 @@ class PreferencesUpdate(BaseModel):
     def at_least_one_field(self) -> "PreferencesUpdate":
         """The contract's `minProperties: 1` and its "no null spelling" rule, in one place.
 
-        An empty body is refused rather than treated as a no-op 200, for the same reason
-        `ContentItemUpdate.at_least_one_field` refuses one: a `PATCH` that changed nothing and
-        answered 200 is indistinguishable from one that worked.
+        An empty body is refused rather than treated as a no-op 200: a `PATCH` that changed nothing
+        and answered 200 is indistinguishable from one that worked.
 
         Both fields are typed `Theme | None` / `bool | None` only so the omitted case can be told
         apart from the sent case via `model_fields_set` — not because either may hold `null` on the
         wire. A field present in `model_fields_set` with a value of `None` was sent as an explicit
         `null`, which the contract refuses: neither column can be cleared, so there is no "unset"
-        meaning for `null` to carry the way there is on `ContentItemUpdate`.
+        meaning for `null` to carry.
         """
         if not self.model_fields_set:
             raise ValueError("Send at least one field to change.")
@@ -164,12 +112,17 @@ class PreferencesUpdate(BaseModel):
 class TripCreate(BaseModel):
     """The contract's `TripCreate`. `name`/`start_date`/`end_date` are required (FR-014);
     `status` defaults to `wishlist`, matching `trip.status`'s own column default.
+
+    `destination` and `notes` (Module 02, §14.1) are both optional — additive fields on top of
+    003's own required set, not a new requirement on every Trip.
     """
 
     name: str = Field(max_length=200)
+    destination: str | None = Field(default=None, max_length=200)
     start_date: date
     end_date: date
     status: TripStatus = TripStatus.WISHLIST
+    notes: str | None = None
 
 
 class TripUpdate(BaseModel):
@@ -177,24 +130,31 @@ class TripUpdate(BaseModel):
     `DestinationUpdate` — **no field here may be sent as an explicit null**. None of `trip`'s
     columns are nullable (data-model.md), so every field in this model has the same "no null
     spelling" rule `PreferencesUpdate` states for both of its own fields.
+
+    `destination` and `notes` are the one exception: both are genuinely nullable columns (Module
+    02), so — like `DestinationUpdate`'s own nullable fields below — they are exempted from the
+    "no null" validator rather than forced to always carry a value.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     name: str | None = Field(default=None, max_length=200)
+    destination: str | None = Field(default=None, max_length=200)
     start_date: date | None = None
     end_date: date | None = None
     status: TripStatus | None = None
+    notes: str | None = None
 
     @model_validator(mode="after")
     def at_least_one_field(self) -> "TripUpdate":
-        """The contract's `minProperties: 1` plus its "no null spelling" rule, in one place —
-        the same shape as `PreferencesUpdate.at_least_one_field`, for the same reason: every
-        field on this model disallows `null`.
+        """The contract's `minProperties: 1` plus its "no null spelling" rule for every field
+        except `destination`/`notes`, which are allowed to null out on purpose (clearing either
+        back to unset).
         """
         if not self.model_fields_set:
             raise ValueError("Send at least one field to change.")
-        nulled = [field for field in self.model_fields_set if getattr(self, field) is None]
+        not_nullable = self.model_fields_set - {"destination", "notes"}
+        nulled = [field for field in not_nullable if getattr(self, field) is None]
         if nulled:
             raise ValueError(f"{', '.join(sorted(nulled))} may not be set to null.")
         return self
@@ -204,16 +164,89 @@ class TripRead(BaseModel):
     """The contract's `Trip` — the single response model for every route in `app/api/trips.py`.
 
     Named `TripRead`, not `Trip`: `app/models.py` already has a SQLModel table class called
-    `Trip`, and a router needs to import both — the same `ContentItemRead` vs `ContentItem`
-    split `content_items.py` already uses, for the same reason (`Trip.id` there is `int | None`
-    until the insert; this model's `id` is the required `int` the contract promises).
+    `Trip`, and a router needs to import both (`Trip.id` there is `int | None` until the insert;
+    this model's `id` is the required `int` the contract promises).
     """
 
     id: int
     name: str
+    destination: str | None
     start_date: date
     end_date: date
     status: TripStatus
+    notes: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+# --- Module 02 (Travel Schedule) --------------------------------------------------------------
+#
+# Built from `Module_02_Travel_Schedule_Spec.md` rather than a ratified spec.md — see the owner's
+# explicit instruction recorded in this iteration's history to bypass the speckit workflow.
+
+
+class TravelEventCreate(BaseModel):
+    """`trip_id`/`title`/`event_date`/`event_type` are required (§14 — every form asks for a
+    title and a date at minimum); every per-type field is optional and unvalidated against
+    `event_type` — the table does not enforce which columns a given type uses, and neither does
+    this model (see `TravelEvent`'s own docstring).
+    """
+
+    trip_id: int | None = None
+    event_type: TravelEventType
+    title: str = Field(max_length=200)
+    event_date: date
+    start_time: time | None = None
+    location: str | None = Field(default=None, max_length=200)
+    from_location: str | None = Field(default=None, max_length=120)
+    to_location: str | None = Field(default=None, max_length=120)
+    booking_reference: str | None = Field(default=None, max_length=120)
+    category: str | None = Field(default=None, max_length=60)
+    notes: str | None = None
+
+
+class TravelEventUpdate(BaseModel):
+    """Partial update, `TripUpdate`'s own shape: at least one key, no unknown ones. Every field
+    here is a genuinely nullable column, so — unlike `TripUpdate` — nothing is exempted from
+    accepting an explicit null; clearing `location` back to unset is a legitimate edit.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    trip_id: int | None = None
+    event_type: TravelEventType | None = None
+    title: str | None = Field(default=None, max_length=200)
+    event_date: date | None = None
+    start_time: time | None = None
+    location: str | None = Field(default=None, max_length=200)
+    from_location: str | None = Field(default=None, max_length=120)
+    to_location: str | None = Field(default=None, max_length=120)
+    booking_reference: str | None = Field(default=None, max_length=120)
+    category: str | None = Field(default=None, max_length=60)
+    notes: str | None = None
+
+    @model_validator(mode="after")
+    def at_least_one_field(self) -> "TravelEventUpdate":
+        if not self.model_fields_set:
+            raise ValueError("Send at least one field to change.")
+        return self
+
+
+class TravelEventRead(BaseModel):
+    """The response model for every route in `app/api/travel_events.py`."""
+
+    id: int
+    trip_id: int | None
+    event_type: TravelEventType
+    title: str
+    event_date: date
+    start_time: time | None
+    location: str | None
+    from_location: str | None
+    to_location: str | None
+    booking_reference: str | None
+    category: str | None
+    notes: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -237,7 +270,7 @@ class DestinationCreate(BaseModel):
 
 class DestinationUpdate(BaseModel):
     """The contract's `DestinationUpdate`: at least one key, no unknown ones, and a **mixed**
-    null-spelling rule, the same shape `ContentItemUpdate` uses. `trip_id`, `start_date`,
+    null-spelling rule. `trip_id`, `start_date`,
     `end_date` and `note` are nullable on `destination` (data-model.md), so an explicit `null`
     on any of those four clears it — `trip_id: null` is FR-020's detach. `name`, `latitude`,
     `longitude` and `status` back `NOT NULL` columns and may not be sent as `null`.
@@ -275,9 +308,9 @@ class DestinationUpdate(BaseModel):
 
 
 class DestinationRead(BaseModel):
-    """The contract's `Destination`. Every nullable field is always emitted, matching
-    `ContentItemRead`'s own precedent of being *stricter* than the contract's optional-but-
-    nullable properties (`backend/AGENTS.md`) — no client written against the contract breaks.
+    """The contract's `Destination`. Every nullable field is always emitted — *stricter* than the
+    contract's optional-but-nullable properties (`backend/AGENTS.md`) — no client written against
+    the contract breaks.
 
     Named `DestinationRead`, not `Destination` — see `TripRead`'s docstring; `app/models.py`'s
     `Destination` is the SQLModel table class this reads from.

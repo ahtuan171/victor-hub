@@ -36,3 +36,9 @@ Thumbs.db
 *.mp4
 *.mov
 *.webm
+
+# AI training data
+ai/
+
+# Backups
+*.csv

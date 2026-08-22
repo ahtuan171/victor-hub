@@ -48,9 +48,11 @@ function trip(overrides: Partial<Trip> = {}): Trip {
   return {
     id: 1,
     name: "Japan 2026",
+    destination: null,
     start_date: "2026-09-01",
     end_date: "2026-09-14",
     status: "wishlist",
+    notes: null,
     created_at: "2026-08-14T00:00:00Z",
     updated_at: "2026-08-14T00:00:00Z",
     ...overrides,

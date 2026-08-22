@@ -32,8 +32,13 @@ async function addCookies(
   await page.context().addCookies(jar);
 }
 
-async function stubContentItems(page: Page): Promise<void> {
-  await page.route("**/api/content-items*", async (route) => {
+/** `/map` (`MapShell`) is the stage now that `/calendar` (Content Calendar) was removed
+ * 2026-08-22 — it loads both Destinations and Trips on mount, so both need stubbing. */
+async function stubMapData(page: Page): Promise<void> {
+  await page.route("**/api/destinations*", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await page.route("**/api/trips*", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
   });
 }
@@ -52,9 +57,9 @@ test("switching applies within the same view, in under a second (SC-005)", async
   baseURL,
 }) => {
   await addCookies(page, baseURL, { theme: "dark" });
-  await stubContentItems(page);
-  await page.goto("/calendar");
-  await page.getByTestId("capture-action").waitFor();
+  await stubMapData(page);
+  await page.goto("/map");
+  await page.getByTestId("map-eyebrow").waitFor();
   expect(await page.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(true);
 
   await page.getByTestId("nav-drawer-trigger").click();
@@ -64,30 +69,30 @@ test("switching applies within the same view, in under a second (SC-005)", async
   // (`applyTheme`), not the outcome of the `PATCH` this same tap also fires.
   expect(await page.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(false);
   // Same screen, same panel — switching is not a navigation.
-  expect(new URL(page.url()).pathname).toBe("/calendar");
+  expect(new URL(page.url()).pathname).toBe("/map");
   await expect(page.getByTestId("nav-drawer-panel")).toBeVisible();
 });
 
 test("the choice persists across a reload (FR-011)", async ({ page, baseURL }) => {
   await addCookies(page, baseURL, { theme: "dark" });
-  await stubContentItems(page);
-  await page.goto("/calendar");
-  await page.getByTestId("capture-action").waitFor();
+  await stubMapData(page);
+  await page.goto("/map");
+  await page.getByTestId("map-eyebrow").waitFor();
 
   await page.getByTestId("nav-drawer-trigger").click();
   await page.getByTestId("theme-option-light").click();
   await page.getByTestId("nav-drawer-close").click();
 
   await page.reload();
-  await page.getByTestId("capture-action").waitFor();
+  await page.getByTestId("map-eyebrow").waitFor();
   expect(await page.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(false);
 });
 
 test("with no choice ever made, the presentation is dark (FR-012)", async ({ page, baseURL }) => {
   await addCookies(page, baseURL, {}); // session only — no ch_theme has ever been written
-  await stubContentItems(page);
-  await page.goto("/calendar");
-  await page.getByTestId("capture-action").waitFor();
+  await stubMapData(page);
+  await page.goto("/map");
+  await page.getByTestId("map-eyebrow").waitFor();
 
   expect(await page.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(true);
 });
@@ -98,11 +103,11 @@ test("the served document already carries the right class — no flash, not even
   baseURL,
 }) => {
   await addCookies(page, baseURL, { theme: "light" });
-  await stubContentItems(page);
+  await stubMapData(page);
 
   // Read at the network layer, before a single line of client JavaScript could run — the strongest
   // form of "before any JavaScript runs" available: there is no JavaScript in this request at all.
-  const htmlClass = await servedHtmlClass(context, "/calendar");
+  const htmlClass = await servedHtmlClass(context, "/map");
   expect(htmlClass.split(/\s+/)).not.toContain("dark");
 });
 
@@ -111,11 +116,14 @@ test("dark is likewise already in the served document when the cookie says dark"
   baseURL,
 }) => {
   await context.addCookies([{ name: SESSION_COOKIE, value: "stub-session", url: baseURL! }]);
-  await context.route("**/api/content-items*", async (route) => {
+  await context.route("**/api/destinations*", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await context.route("**/api/trips*", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
   });
 
-  const htmlClass = await servedHtmlClass(context, "/calendar");
+  const htmlClass = await servedHtmlClass(context, "/map");
   expect(htmlClass.split(/\s+/)).toContain("dark");
 });
 
@@ -125,7 +133,7 @@ test("another device signing into the same account sees the account's presentati
 }) => {
   // A fresh cookie jar, no `ch_theme` of its own yet — simulating a second device where this
   // creator has never opened the product before, only ever chosen light on the first one.
-  await stubContentItems(page);
+  await stubMapData(page);
   await page.route("**/api/auth/login", async (route) => {
     // Two `Set-Cookie` values cannot be joined into one header string (unlike other headers, commas
     // inside a cookie's own attributes make that ambiguous — RFC 6265 requires separate header
@@ -147,8 +155,8 @@ test("another device signing into the same account sees the account's presentati
   await page.getByLabel("Password").fill("x");
   await page.getByRole("button", { name: /sign in/i }).click();
 
-  await page.waitForURL("**/calendar");
-  await page.getByTestId("capture-action").waitFor();
+  await page.waitForURL("**/map");
+  await page.getByTestId("map-eyebrow").waitFor();
   expect(await page.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(false);
 });
 
@@ -157,12 +165,12 @@ test("holds under a throttled connection — correct from the server, not a clie
   baseURL,
 }) => {
   await addCookies(page, baseURL, { theme: "light" });
-  await stubContentItems(page);
+  await stubMapData(page);
 
   // Slow the document response specifically. If correctness ever came from a client-side script
   // instead of the server-rendered class, a slow connection is exactly what would expose the gap —
   // more time for a "flash" to be visible, not less.
-  await page.route("**/calendar", async (route) => {
+  await page.route("**/map", async (route) => {
     if (route.request().resourceType() === "document") {
       await new Promise((resolve) => setTimeout(resolve, 400));
     }
@@ -171,7 +179,7 @@ test("holds under a throttled connection — correct from the server, not a clie
 
   // `domcontentloaded`, deliberately not the default `load` — checked before hydration has had any
   // chance to run, let alone correct anything.
-  await page.goto("/calendar", { waitUntil: "domcontentloaded" });
+  await page.goto("/map", { waitUntil: "domcontentloaded" });
   expect(await page.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(false);
 });
 

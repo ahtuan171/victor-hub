@@ -26,8 +26,8 @@ router = APIRouter(prefix="/destinations", tags=["destinations"])
 
 def get_or_404(session: SessionDep, destination_id: int) -> Destination:
     """Fetch one Destination or raise the contract's 404 — the shared lookup every
-    id-addressed route in this file uses, matching `001`'s `get_or_404` precedent
-    (`content_items.py`) so "no such destination" reads identically whichever verb asked.
+    id-addressed route in this file uses, matching `trips.py`'s own `get_or_404`
+    so "no such destination" reads identically whichever verb asked.
     """
     destination = session.get(Destination, destination_id)
     if destination is None:
@@ -295,8 +295,8 @@ def delete_destination(
     """FR-016. Cascades to `photograph` rows via `ON DELETE CASCADE` (data-model.md) — nothing
     here has to delete them explicitly. Does **not** touch the parent Trip, if any.
 
-    No return annotation of `Response` and no `response_model`, matching `001`'s
-    `delete_content_item` precedent: a 204 must carry no body.
+    No return annotation of `Response` and no `response_model`, matching `trips.py`'s
+    `delete_trip`: a 204 must carry no body.
     """
     session.delete(get_or_404(session, destination_id))
     session.commit()

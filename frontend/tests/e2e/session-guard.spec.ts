@@ -38,8 +38,9 @@ import { expect, test } from "@playwright/test";
  * them apart — which is why removing the page-level check would leave this file green.
  */
 
-/** The first route to live inside `(app)`, created at T033. */
-const GUARDED_PATH = "/calendar";
+/** Any route inside `(app)` — `/calendar` (the first, at T033) was removed 2026-08-22 along with
+ * the rest of Content Calendar; `/map` carries the identical page-level check now. */
+const GUARDED_PATH = "/map";
 
 /** Matches `sessionCookieName()`'s default and `.env.example`. Unset in the test environment. */
 const SESSION_COOKIE = "ch_session";

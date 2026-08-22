@@ -26,8 +26,9 @@ def test_get_returns_dark_and_false_for_a_never_touched_creator(auth_client: Tes
 
 def test_preferences_operations_take_no_identifier(app: FastAPI) -> None:
     """INV-1, mechanically: the generated document declares no path parameter on either operation,
-    because the route itself has nowhere for one to be declared. `GET` and `PATCH /content-items` by
-    contrast both carry an `item_id` — the absence here is deliberate, not an oversight.
+    because the route itself has nowhere for one to be declared. `GET`/`PATCH`/`DELETE
+    /trips/{trip_id}` by contrast carry a `trip_id` — the absence here is deliberate, not an
+    oversight.
     """
     app.openapi_schema = None
     document: dict[str, Any] = app.openapi()
@@ -43,7 +44,7 @@ def test_preferences_operations_take_no_identifier(app: FastAPI) -> None:
 
 def test_patch_with_empty_body_is_422(auth_client: TestClient) -> None:
     """The contract's `minProperties: 1`. An empty body is not a no-op 200 — see
-    `ContentItemUpdate.at_least_one_field` for the same rule and the same reason.
+    `TripUpdate.at_least_one_field` for the same rule and the same reason.
     """
     response = auth_client.patch("/preferences", json={})
 
@@ -124,7 +125,7 @@ def test_patch_with_an_invalid_theme_value_is_422(auth_client: TestClient) -> No
 
 
 def test_patch_rejects_an_explicit_null(auth_client: TestClient) -> None:
-    """Unlike `ContentItemUpdate`, neither field here is nullable — the contract states this
+    """Neither field here is nullable — the contract states this
     explicitly, because both columns are `NOT NULL` with a default and "clear it" has no meaning.
     An explicit `null` is therefore a validation failure, not a third intention.
     """

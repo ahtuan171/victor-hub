@@ -31,18 +31,21 @@ async function signedIn(page: Page, baseURL: string | undefined): Promise<void> 
 }
 
 /**
- * Open the calendar with an empty list.
+ * Open the map with an empty list.
  *
- * The item list is irrelevant to signing out, and an empty one keeps the first-run copy (T068) out
- * of the way of the header this file is about.
+ * `/map` is the stage since `/calendar` (Content Calendar) was removed 2026-08-22 — the owner's
+ * instruction. The place list is irrelevant to signing out; an empty one is simplest.
  */
-async function openCalendar(page: Page, baseURL: string | undefined): Promise<void> {
-  await page.route("**/api/content-items*", async (route) => {
+async function openMap(page: Page, baseURL: string | undefined): Promise<void> {
+  await page.route("**/api/destinations*", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await page.route("**/api/trips*", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
   });
   await signedIn(page, baseURL);
-  await page.goto("/calendar");
-  await page.getByTestId("capture-action").waitFor();
+  await page.goto("/map");
+  await page.getByTestId("map-eyebrow").waitFor();
 }
 
 /** Open the nav drawer, the one place `sign-out-action` lives since T030. */
@@ -76,8 +79,8 @@ function stubLogout(
   return { calls };
 }
 
-test("sign-out is not reachable from the calendar in a single tap", async ({ page, baseURL }) => {
-  await openCalendar(page, baseURL);
+test("sign-out is not reachable from the map in a single tap", async ({ page, baseURL }) => {
+  await openMap(page, baseURL);
 
   // FR-017: not a single accidental tap. The control exists, but only inside the drawer this test
   // has not opened yet.
@@ -85,7 +88,7 @@ test("sign-out is not reachable from the calendar in a single tap", async ({ pag
 });
 
 test("the drawer carries a sign-out control, at its far end", async ({ page, baseURL }) => {
-  await openCalendar(page, baseURL);
+  await openMap(page, baseURL);
   await openDrawer(page);
 
   await expect(page.getByTestId("sign-out-action")).toBeVisible();
@@ -100,7 +103,7 @@ test("the drawer carries a sign-out control, at its far end", async ({ page, bas
 });
 
 test("signing out ends the session and lands on the login page", async ({ page, baseURL }) => {
-  await openCalendar(page, baseURL);
+  await openMap(page, baseURL);
   await openDrawer(page);
   const logout = stubLogout(page);
 
@@ -118,7 +121,7 @@ test("signing out of an already-dead session still reaches the login page", asyn
   page,
   baseURL,
 }) => {
-  await openCalendar(page, baseURL);
+  await openMap(page, baseURL);
   await openDrawer(page);
   const logout = stubLogout(page, 401);
 
@@ -127,16 +130,16 @@ test("signing out of an already-dead session still reaches the login page", asyn
   // `logout()` is the one operation in `lib/api.ts` that swallows a 401, and this is the case it was
   // written for: the proxy clears the cookie on any 401, so by the time the client sees one the
   // session is genuinely over — which is where sign-out was going. Rethrowing would strand the
-  // creator on a calendar backed by a credential that no longer exists.
+  // creator on a map backed by a credential that no longer exists.
   await page.waitForURL("**/login");
   expect(logout.calls).toEqual([{ method: "POST" }]);
 });
 
-test("a refused sign-out keeps the creator on the calendar and says so", async ({
+test("a refused sign-out keeps the creator on the map and says so", async ({
   page,
   baseURL,
 }) => {
-  await openCalendar(page, baseURL);
+  await openMap(page, baseURL);
   await openDrawer(page);
   stubLogout(page, 500);
 
@@ -147,7 +150,7 @@ test("a refused sign-out keeps the creator on the calendar and says so", async (
   // anyway would report an ending that did not happen — FR-002a's "ends only on ... an explicit
   // sign-out" read backwards.
   await expect(page.getByTestId("sign-out-message")).toHaveText(/could not sign you out/i);
-  expect(new URL(page.url()).pathname).toBe("/calendar");
+  expect(new URL(page.url()).pathname).toBe("/map");
   // Still offered, because the creator's next move is to try again — and the drawer stayed open
   // through the refusal rather than closing on it, which would have hidden the very message this
   // asserts.
@@ -158,7 +161,7 @@ test("the sign-out control meets the 44px tap floor and does not overflow", asyn
   page,
   baseURL,
 }) => {
-  await openCalendar(page, baseURL);
+  await openMap(page, baseURL);
   await openDrawer(page);
 
   const viewport = page.viewportSize()!;
@@ -172,34 +175,8 @@ test("the sign-out control meets the 44px tap floor and does not overflow", asyn
   expect(overflows).toBe(false);
 });
 
-test("the header still fits its longest period title beside the drawer trigger", async ({
-  page,
-  baseURL,
-}) => {
-  await signedIn(page, baseURL);
-  await page.route("**/api/content-items*", async (route) => {
-    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
-  });
-
-  // The same worst case `period-nav.spec.ts` pins: 31 December 2026 is a Thursday, so its week is
-  // `28 Dec 2026 – 3 Jan 2027`, the longest title this product can produce. This test predates the
-  // drawer trigger (it used to pin the sign-out control T030 moved out of this row); it stays here
-  // because the header is the band with the least slack after the action bar, whichever control
-  // shares the row with the title.
-  await page.clock.setFixedTime(Date.UTC(2026, 11, 31, 3, 0, 0));
-  await page.goto("/calendar");
-  await page.getByTestId("capture-action").waitFor();
-  await page.getByTestId("view-week").click();
-  await expect(page.getByTestId("calendar-period")).toHaveText("28 Dec 2026 – 3 Jan 2027");
-
-  const overflows = await page.evaluate(
-    () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
-  );
-  expect(overflows).toBe(false);
-
-  const title = (await page.getByTestId("calendar-period").boundingBox())!;
-  const trigger = (await page.getByTestId("nav-drawer-trigger").boundingBox())!;
-  // Adjacent, not overlapping — an overflow-hidden title that had been silently clipped would still
-  // satisfy the scroll check above.
-  expect(title.x + title.width).toBeLessThanOrEqual(trigger.x);
-});
+// The old "the header still fits its longest period title beside the drawer trigger" test is
+// removed rather than ported: it pinned Content Calendar's `PeriodNav` title (`28 Dec 2026 – 3 Jan
+// 2027`, the longest string that surface could produce next to the drawer trigger), and `/map`'s
+// own header has no equivalent — `map-title`/`map-eyebrow` are static strings, not a navigated
+// period. `/map`'s header overflow at 375px is covered by `viewport-audit.spec.ts` instead.

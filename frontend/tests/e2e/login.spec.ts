@@ -60,6 +60,20 @@ async function signIn(page: Page, email: string, password: string): Promise<void
   await page.getByRole("button", { name: /sign in/i }).click();
 }
 
+/**
+ * `/map` (the landing screen since 2026-08-22) loads Destinations and Trips on mount. Stubbed here
+ * so a real backend left running locally cannot 401 these requests and bounce the test back to
+ * `/login` — the trap `frontend/AGENTS.md` already documents for other e2e files.
+ */
+async function stubMapData(page: Page): Promise<void> {
+  await page.route("**/api/destinations*", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await page.route("**/api/trips*", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+}
+
 test("the page body does not scroll horizontally at 375px", async ({ page }) => {
   await page.goto("/login");
 
@@ -125,24 +139,27 @@ test("a successful sign-in sends the credentials and leaves for the landing scre
   page,
 }) => {
   const stub = await stubLogin(page, 200, LOGIN_RESPONSE);
+  await stubMapData(page);
 
   await page.goto("/login");
   await signIn(page, "creator@example.com", "hunter2");
 
   // Since T033 this lands on a real, guarded page rather than a 404 — which is why `stubLogin` now
-  // sets the session cookie as well as returning the body.
-  await page.waitForURL("**/calendar");
-  expect(new URL(page.url()).pathname).toBe("/calendar");
+  // sets the session cookie as well as returning the body. The landing screen moved from
+  // `/calendar` to `/map` 2026-08-22, when Content Calendar was removed — the owner's instruction.
+  await page.waitForURL("**/map");
+  expect(new URL(page.url()).pathname).toBe("/map");
 
   expect(stub.requests).toEqual([{ email: "creator@example.com", password: "hunter2" }]);
 });
 
 test("signing in does not put a token anywhere the browser can read", async ({ page }) => {
   await stubLogin(page, 200, { ...LOGIN_RESPONSE, access_token: "leaked.jwt.value" });
+  await stubMapData(page);
 
   await page.goto("/login");
   await signIn(page, "creator@example.com", "hunter2");
-  await page.waitForURL("**/calendar");
+  await page.waitForURL("**/map");
 
   // R-001 in one assertion. The proxy is what strips the token in production; this guards the other
   // end — that the *page* never copies a credential into storage even when handed one. A future

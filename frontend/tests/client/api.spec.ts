@@ -1,17 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import {
-  ApiError,
-  createContentItem,
-  deleteContentItem,
-  getContentItem,
-  listContentItems,
-  login,
-  logout,
-  updateContentItem,
-  type ContentItem,
-  type ContentItemUpdate,
-} from "../../lib/api";
+import { ApiError, createTrip, listTrips, login, logout } from "../../lib/api";
 
 /**
  * The API client driven against a stubbed `fetch`.
@@ -97,13 +86,13 @@ test.afterEach(() => {
 test.describe("the transport", () => {
   test("every request is same-origin under /api and carries no Authorization header", async () => {
     stub(() => json([]));
-    await listContentItems();
+    await listTrips();
 
     const { url, init } = onlyCall();
 
     // Relative, so it resolves against the Vercel origin. An absolute backend URL here would be
     // the browser talking to Render directly, which is the whole thing R-001 forbids.
-    expect(url).toBe("/api/content-items");
+    expect(url).toBe("/api/trips");
     expect(url.startsWith("http")).toBe(false);
 
     // The cookie is the credential and the proxy turns it into a bearer. A header set here would
@@ -116,7 +105,7 @@ test.describe("the transport", () => {
 
   test("a GET sends no body and no content-type", async () => {
     stub(() => json([]));
-    await listContentItems();
+    await listTrips();
 
     const { init } = onlyCall();
     expect(init.body).toBeUndefined();
@@ -137,7 +126,7 @@ test.describe("the transport", () => {
   test("an error body that is not the contract's shape still yields a readable sentence", async () => {
     stub(() => new Response("<html>502 Bad Gateway</html>", { status: 502 }));
 
-    const error = (await listContentItems().catch((caught: unknown) => caught)) as ApiError;
+    const error = (await listTrips().catch((caught: unknown) => caught)) as ApiError;
 
     expect(error).toBeInstanceOf(ApiError);
     expect(error.status).toBe(502);
@@ -145,14 +134,16 @@ test.describe("the transport", () => {
   });
 });
 
+const TRIP_DRAFT = { name: "x", start_date: "2026-09-01", end_date: "2026-09-02" };
+
 test.describe("the 401 handler (T024)", () => {
-  test("a 401 on a content read sends the browser to /login", async () => {
-    fakeWindowAt("/calendar");
+  test("a 401 on a read sends the browser to /login", async () => {
+    fakeWindowAt("/map");
     stub(() => json({ detail: "Not authenticated" }, 401));
 
     // The error still reaches the caller: navigation is not instantaneous, so a surface that
     // ignored it would keep rendering for a beat.
-    await expect(listContentItems()).rejects.toThrow(ApiError);
+    await expect(listTrips()).rejects.toThrow(ApiError);
 
     // `replace`, not `assign` — the page that just 401'd must not sit in history, or going back
     // would 401 again and bounce straight here.
@@ -160,10 +151,10 @@ test.describe("the 401 handler (T024)", () => {
   });
 
   test("it fires on create too — one handler, not one per operation (FR-002)", async () => {
-    fakeWindowAt("/calendar");
+    fakeWindowAt("/map");
     stub(() => json({ detail: "Not authenticated" }, 401));
 
-    await expect(createContentItem({ title: "x" })).rejects.toThrow(ApiError);
+    await expect(createTrip(TRIP_DRAFT)).rejects.toThrow(ApiError);
     expect(replaced).toEqual(["/login"]);
   });
 
@@ -178,7 +169,7 @@ test.describe("the 401 handler (T024)", () => {
   });
 
   test("logout does not redirect — its caller owns where to go next", async () => {
-    fakeWindowAt("/calendar");
+    fakeWindowAt("/map");
     stub(() => json({ detail: "Not authenticated" }, 401));
 
     await expect(logout()).resolves.toBeUndefined();
@@ -189,16 +180,16 @@ test.describe("the 401 handler (T024)", () => {
     fakeWindowAt("/login");
     stub(() => json({ detail: "Not authenticated" }, 401));
 
-    await expect(listContentItems()).rejects.toThrow(ApiError);
+    await expect(listTrips()).rejects.toThrow(ApiError);
     expect(replaced).toEqual([]);
   });
 
   test("no other status redirects", async () => {
-    fakeWindowAt("/calendar");
+    fakeWindowAt("/map");
 
     for (const status of [403, 404, 409, 422, 500, 502]) {
       stub(() => json({ detail: "nope" }, status));
-      await expect(listContentItems()).rejects.toThrow(ApiError);
+      await expect(listTrips()).rejects.toThrow(ApiError);
     }
 
     expect(replaced).toEqual([]);
@@ -208,7 +199,7 @@ test.describe("the 401 handler (T024)", () => {
     // No fakeWindowAt() — this is the runner's natural state, and the server's.
     stub(() => json({ detail: "Not authenticated" }, 401));
 
-    await expect(listContentItems()).rejects.toThrow(ApiError);
+    await expect(listTrips()).rejects.toThrow(ApiError);
     expect(replaced).toEqual([]);
   });
 });
@@ -267,302 +258,3 @@ test.describe("logout", () => {
   });
 });
 
-test.describe("listContentItems", () => {
-  test("sends no query string when given no parameters", async () => {
-    stub(() => json([]));
-    await listContentItems();
-
-    expect(onlyCall().url).toBe("/api/content-items");
-  });
-
-  test("sends only the parameters that are set", async () => {
-    stub(() => json([]));
-    await listContentItems({ date_from: "2026-08-01", date_to: "2026-09-06" });
-
-    expect(onlyCall().url).toBe("/api/content-items?date_from=2026-08-01&date_to=2026-09-06");
-  });
-
-  test("the backlog read is scheduled=none (FR-011)", async () => {
-    stub(() => json([]));
-    await listContentItems({ scheduled: "none" });
-
-    expect(onlyCall().url).toBe("/api/content-items?scheduled=none");
-  });
-
-  test("fills the contract's optional nullable fields so ContentItem is true as declared", async () => {
-    // The contract's `required` list is [id, title, status, created_at, updated_at], so a response
-    // is free to omit the other four rather than send null.
-    stub(() =>
-      json([
-        {
-          id: 1,
-          title: "Morning routine",
-          status: "idea",
-          created_at: "2026-07-31T02:00:00Z",
-          updated_at: "2026-07-31T02:00:00Z",
-        },
-      ]),
-    );
-
-    const [item] = await listContentItems();
-
-    // Annotated rather than inline: the type is half the assertion — it fails to compile if
-    // ContentItem ever stops requiring one of these fields.
-    const expected: ContentItem = {
-      id: 1,
-      title: "Morning routine",
-      hook: null,
-      platform: null,
-      scheduled_date: null,
-      status: "idea",
-      published_url: null,
-      created_at: "2026-07-31T02:00:00Z",
-      updated_at: "2026-07-31T02:00:00Z",
-    };
-
-    expect(item).toEqual(expected);
-  });
-
-  test("leaves a scheduled_date as the YYYY-MM-DD string it arrived as", async () => {
-    stub(() =>
-      json([
-        {
-          id: 2,
-          title: "Launch teaser",
-          hook: null,
-          platform: "tiktok",
-          scheduled_date: "2026-08-04",
-          status: "draft",
-          published_url: null,
-          created_at: "2026-07-31T02:00:00Z",
-          updated_at: "2026-07-31T02:00:00Z",
-        },
-      ]),
-    );
-
-    const [item] = await listContentItems();
-
-    // A string, never a Date. `new Date("2026-08-04")` is UTC midnight and renders as the 3rd
-    // west of Greenwich (research.md R-006) — lib/dates.ts at T028 is what formats this.
-    expect(item?.scheduled_date).toBe("2026-08-04");
-    expect(item?.platform).toBe("tiktok");
-  });
-});
-
-test.describe("createContentItem", () => {
-  test("sends title alone, because title alone is all FR-005 requires", async () => {
-    stub(() =>
-      json(
-        {
-          id: 3,
-          title: "Idea from the car",
-          status: "idea",
-          created_at: "2026-07-31T02:00:00Z",
-          updated_at: "2026-07-31T02:00:00Z",
-        },
-        201,
-      ),
-    );
-
-    const item = await createContentItem({ title: "Idea from the car" });
-
-    const { url, init } = onlyCall();
-    expect(init.method).toBe("POST");
-    expect(url).toBe("/api/content-items");
-    expect(JSON.parse(init.body as string)).toEqual({ title: "Idea from the car" });
-
-    expect(item.status).toBe("idea");
-    expect(item.platform).toBeNull();
-  });
-
-  test("a 409 arrives with its code, so a caller need not match on prose (INV-1, FR-009)", async () => {
-    stub(() =>
-      json({ code: "platform_required", detail: "Set a platform before moving this out of idea." }, 409),
-    );
-
-    const error = (await createContentItem({ title: "x", status: "draft" }).catch(
-      (caught: unknown) => caught,
-    )) as ApiError;
-
-    expect(error).toBeInstanceOf(ApiError);
-    expect(error.status).toBe(409);
-    expect(error.code).toBe("platform_required");
-    expect(error.detail).toContain("platform");
-  });
-
-  test("code is null when the body carries none — every non-409 error, and any 409 without one", async () => {
-    stub(() => json({ detail: "Title must not be empty." }, 422));
-
-    const error = (await createContentItem({ title: " " }).catch((caught: unknown) => caught)) as ApiError;
-
-    expect(error.status).toBe(422);
-    expect(error.code).toBeNull();
-  });
-});
-
-/** A saved row, as the by-id operations answer with. */
-function savedItem(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    id: 7,
-    title: "Ring light review",
-    hook: null,
-    platform: "tiktok",
-    scheduled_date: "2026-08-04",
-    status: "draft",
-    published_url: null,
-    created_at: "2026-08-01T09:00:00Z",
-    updated_at: "2026-08-01T09:00:00Z",
-    ...overrides,
-  };
-}
-
-test.describe("getContentItem", () => {
-  test("addresses the item by id and normalises the response like the list does", async () => {
-    stub(() => json({ id: 7, title: "Ring light review", status: "idea", created_at: "x", updated_at: "x" }));
-
-    const item = await getContentItem(7);
-
-    const { url, init } = onlyCall();
-    expect(init.method).toBe("GET");
-    expect(url).toBe("/api/content-items/7");
-    expect(init.body).toBeUndefined();
-
-    // The same `toContentItem` normalisation as `listContentItems` — a single item must not arrive
-    // with `undefined` in the four optional-but-nullable fields when a listed one arrives with null.
-    expect(item.hook).toBeNull();
-    expect(item.platform).toBeNull();
-    expect(item.scheduled_date).toBeNull();
-    expect(item.published_url).toBeNull();
-  });
-
-  test("a 404 is an ApiError carrying the backend's sentence", async () => {
-    stub(() => json({ detail: "Content item not found." }, 404));
-
-    const error = (await getContentItem(99).catch((caught: unknown) => caught)) as ApiError;
-
-    expect(error).toBeInstanceOf(ApiError);
-    expect(error.status).toBe(404);
-    expect(error.detail).toBe("Content item not found.");
-  });
-});
-
-test.describe("updateContentItem", () => {
-  test("sends a PATCH to the item's own address", async () => {
-    stub(() => json(savedItem()));
-
-    await updateContentItem(7, { status: "draft" });
-
-    const { url, init } = onlyCall();
-    expect(init.method).toBe("PATCH");
-    expect(url).toBe("/api/content-items/7");
-    expect(Object.keys(init.headers as Record<string, string>)).toContain("content-type");
-  });
-
-  test("an omitted field is absent from the body, so the server leaves it alone (FR-023)", async () => {
-    stub(() => json(savedItem()));
-
-    await updateContentItem(7, { scheduled_date: "2026-08-09" });
-
-    // The backend reads `model_dump(exclude_unset=True)`. A key that reaches it — with any value,
-    // including null — is a field it will write. Sending the whole item would turn every edit into
-    // a full replacement.
-    const body = JSON.parse(onlyCall().init.body as string) as Record<string, unknown>;
-    expect(Object.keys(body)).toEqual(["scheduled_date"]);
-  });
-
-  test("an explicit null survives serialisation, because null means clear (FR-023)", async () => {
-    stub(() => json(savedItem({ scheduled_date: null })));
-
-    // Back to the backlog: `null` here is not "no opinion", it is "unschedule this".
-    await updateContentItem(7, { scheduled_date: null });
-
-    const body = JSON.parse(onlyCall().init.body as string) as Record<string, unknown>;
-    expect(body).toEqual({ scheduled_date: null });
-    // The distinction the whole of `exactOptionalPropertyTypes` exists to protect: had this been
-    // `undefined`, `JSON.stringify` would have dropped the key and the request would have meant
-    // the opposite.
-    expect("scheduled_date" in body).toBe(true);
-  });
-
-  test("several fields in one request, which is what a sheet save is", async () => {
-    stub(() => json(savedItem()));
-
-    const changes: ContentItemUpdate = { title: "Ring light review", platform: "tiktok", status: "draft" };
-    await updateContentItem(7, changes);
-
-    expect(JSON.parse(onlyCall().init.body as string)).toEqual({
-      title: "Ring light review",
-      platform: "tiktok",
-      status: "draft",
-    });
-  });
-
-  test("a 409 arrives with platform_required, so T053 can offer the platform control (FR-009)", async () => {
-    stub(() =>
-      json({ code: "platform_required", detail: "Pick a platform before moving this item out of ideas." }, 409),
-    );
-
-    const error = (await updateContentItem(7, { status: "draft" }).catch(
-      (caught: unknown) => caught,
-    )) as ApiError;
-
-    expect(error.status).toBe(409);
-    expect(error.code).toBe("platform_required");
-  });
-
-  test("a 409 arrives with platform_locked, the other direction of the same invariant (FR-009a)", async () => {
-    stub(() =>
-      json({ code: "platform_locked", detail: "Move this item back to ideas before removing its platform." }, 409),
-    );
-
-    const error = (await updateContentItem(7, { platform: null }).catch(
-      (caught: unknown) => caught,
-    )) as ApiError;
-
-    expect(error.status).toBe(409);
-    // Two codes from one rule, and the surface needs them apart: one says "pick a platform", the
-    // other says "move it back to ideas first".
-    expect(error.code).toBe("platform_locked");
-  });
-
-  test("a 401 redirects, like every other content operation", async () => {
-    fakeWindowAt("/calendar");
-    stub(() => json({ detail: "Not authenticated" }, 401));
-
-    await expect(updateContentItem(7, { status: "posted" })).rejects.toThrow(ApiError);
-    expect(replaced).toEqual(["/login"]);
-  });
-});
-
-test.describe("deleteContentItem", () => {
-  test("resolves on the contract's 204, which has no body to parse", async () => {
-    stub(() => new Response(null, { status: 204 }));
-
-    await expect(deleteContentItem(7)).resolves.toBeUndefined();
-
-    const { url, init } = onlyCall();
-    expect(init.method).toBe("DELETE");
-    expect(url).toBe("/api/content-items/7");
-    expect(init.body).toBeUndefined();
-  });
-
-  test("a 404 throws rather than being swallowed — T056 decides whether it is benign", async () => {
-    stub(() => json({ detail: "Content item not found." }, 404));
-
-    // T050 settled that the backend answers 404 rather than an idempotent 204. Deciding that a
-    // missing row is a success is a *surface* judgement (the screen is being reconciled, not a
-    // transaction), so this client reports what happened and lets T056 choose.
-    const error = (await deleteContentItem(99).catch((caught: unknown) => caught)) as ApiError;
-
-    expect(error).toBeInstanceOf(ApiError);
-    expect(error.status).toBe(404);
-  });
-
-  test("a 401 redirects", async () => {
-    fakeWindowAt("/calendar");
-    stub(() => json({ detail: "Not authenticated" }, 401));
-
-    await expect(deleteContentItem(7)).rejects.toThrow(ApiError);
-    expect(replaced).toEqual(["/login"]);
-  });
-});
